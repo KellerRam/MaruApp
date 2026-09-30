@@ -1,14 +1,21 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { usePathname } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Alert, Modal, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import FormPickerInput from '../../components/ui/FormPickerInput';
 import { API_URL } from '../../config/api';
+import { apiFetch as fetch } from '../../config/apiFetch';
 
 const horaSinSegundos = (hora) => String(hora || '').slice(0, 5);
 
 const convertirFechaHora = (fecha, hora) => {
   const fechaTexto = String(fecha || '').slice(0, 10);
   const horaTexto = horaSinSegundos(hora);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(fechaTexto) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(horaTexto)) return null;
+  
+  const esFechaValida = /^\d{4}-\d{2}-\d{2}$/.test(fechaTexto);
+  const esHoraValida = /^([01]\d|2[0-3]):[0-5]\d$/.test(horaTexto);
+
+  if (!esFechaValida || !esHoraValida) return null;
   return new Date(`${fechaTexto}T${horaTexto}:00`);
 };
 
@@ -23,70 +30,124 @@ const fechaLocalISO = (fecha) => {
   return `${año}-${mes}-${dia}`;
 };
 
+const ESCALA_ANIMO = [
+  { valor: 'mal', emoji: '😞', etiqueta: 'Mal' },
+  { valor: 'regular', emoji: '😐', etiqueta: 'Regular' },
+  { valor: 'bien', emoji: '🙂', etiqueta: 'Bien' },
+  { valor: 'muy_bien', emoji: '😄', etiqueta: 'Muy bien' },
+];
+
 export default function PantallaInicio() {
+  const pathname = usePathname();
   const [datosPantalla, setDatosPantalla] = useState({
     cuidadorActual: 'Cargando...',
-    proximaToma: 'no hay tomas registradas',
-    proximoCuidador: '',
-    actividadProxima: '',
+    proximaToma: 'No hay tomas registradas',
+    proximoCuidador: 'No hay turnos registrados',
+    actividadProxima: 'No hay eventos próximos',
     fechaActual: new Date().getDate().toString(),
     diaActual: new Intl.DateTimeFormat('es', { weekday: 'long' }).format(new Date()).toUpperCase(),
   });
   const [idGrupo, setIdGrupo] = useState(null);
   const [idUsuario, setIdUsuario] = useState(null);
+  const [tienePaciente, setTienePaciente] = useState(false);
   const [modalSintoma, setModalSintoma] = useState(false);
   const [nombreSintoma, setNombreSintoma] = useState('');
   const [descripcionSintoma, setDescripcionSintoma] = useState('');
   const [fechaSintoma, setFechaSintoma] = useState(fechaLocalISO(new Date()));
   const [horaSintoma, setHoraSintoma] = useState(horaSinSegundos(new Date().toTimeString()));
   const [guardandoSintoma, setGuardandoSintoma] = useState(false);
+  const [modalAnimo, setModalAnimo] = useState(false);
+  const [animoSeleccionado, setAnimoSeleccionado] = useState(null);
+  const [textoAnimo, setTextoAnimo] = useState('');
+  const [guardandoAnimo, setGuardandoAnimo] = useState(false);
 
   useEffect(() => {
+    let isMounted = true;
+
     const cargarResumen = async () => {
-      const idUsuario = await AsyncStorage.getItem('userId');
-      if (!idUsuario) return;
+      try {
+        const idUsuarioActivo = await AsyncStorage.getItem('userId');
+        if (!idUsuarioActivo || !isMounted) return;
 
-      const grupoRespuesta = await fetch(`${API_URL}/api/groups/user/${idUsuario}`);
-      if (!grupoRespuesta.ok) return;
-      const grupoDatos = await grupoRespuesta.json();
-      const grupo = grupoDatos.grupo;
-      if (!grupo?.id_grupo) return;
-      setIdGrupo(grupo.id_grupo);
-      setIdUsuario(Number(idUsuario));
+        const grupoRespuesta = await fetch(`${API_URL}/api/groups/user/${idUsuarioActivo}`);
+        if (!grupoRespuesta.ok) return;
+        const grupoDatos = await grupoRespuesta.json();
+        const grupo = grupoDatos.grupo;
+        if (!grupo?.id_grupo || !isMounted) return;
+        
+        setIdGrupo(grupo.id_grupo);
+        setIdUsuario(Number(idUsuarioActivo));
 
-      const calendarioRespuesta = await fetch(`${API_URL}/api/calendar/group/${grupo.id_grupo}`);
-      const calendario = calendarioRespuesta.ok ? await calendarioRespuesta.json() : { eventos: [] };
-      const horariosRespuesta = await fetch(`${API_URL}/api/schedules/${grupo.id_grupo}`);
-      const horarios = horariosRespuesta.ok ? await horariosRespuesta.json() : { horariosCuidado: [], medicamentos: [] };
-      const ahora = new Date();
-      const inicioDelDia = new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate());
-      const medicamento = (horarios.medicamentos || [])
-        .map((item) => ({ item, fechaHora: convertirFechaHora(item.fecha_inicio, item.hora_toma) }))
-        .filter(({ fechaHora }) => fechaHora && fechaHora >= ahora)
-        .sort((a, b) => a.fechaHora - b.fechaHora)[0];
-      const cuidado = (horarios.horariosCuidado || [])
-        .map((item) => ({ item, inicio: convertirFechaHora(item.fecha_inicio, item.hora_inicio), fin: convertirFechaHora(item.fecha_fin, item.hora_fin) }))
-        .filter(({ inicio, fin }) => inicio && inicio >= inicioDelDia && fin && fin >= ahora)
-        .sort((a, b) => (a.inicio || a.fin) - (b.inicio || b.fin))[0];
-      const evento = (calendario.eventos || [])
-        .map((item) => ({ item, fechaHora: convertirFechaHora(item.fecha_evento, item.hora_evento) }))
-        .filter(({ fechaHora }) => fechaHora && fechaHora >= ahora)
-        .sort((a, b) => a.fechaHora - b.fechaHora)[0];
-      const toma = medicamento?.item;
-      const turno = cuidado?.item;
-      const proximoEvento = evento?.item;
+        // Verificar en tiempo real si el grupo tiene un miembro con rol de paciente
+        const miembrosRes = await fetch(`${API_URL}/api/groups/${grupo.id_grupo}/members`);
+        if (miembrosRes.ok && isMounted) {
+          const miembrosDatos = await miembrosRes.json();
+          const miembros = miembrosDatos.miembros || [];
+          const existePaciente = miembros.some(
+            (m) => String(m.rol || '').trim().toLowerCase() === 'paciente'
+          );
+          setTienePaciente(existePaciente);
 
-      setDatosPantalla((actual) => ({
-        ...actual,
-        cuidadorActual: grupo.nombre_grupo,
-        proximaToma: toma ? `${horaSinSegundos(toma.hora_toma)} - ${toma.nombre_medicamento}: ${toma.dosis}` : 'no hay tomas registradas',
-        proximoCuidador: turno ? `${horaSinSegundos(turno.hora_inicio)} - ${horaSinSegundos(turno.hora_fin)} ${turno.encargado}` : '',
-        actividadProxima: proximoEvento ? `${formatoFecha(convertirFechaHora(proximoEvento.fecha_evento, proximoEvento.hora_evento))} - ${horaSinSegundos(proximoEvento.hora_evento)} - ${proximoEvento.nombre_evento}` : '',
-      }));
+          const propio = miembros.find((m) => Number(m.id_usuario) === Number(idUsuarioActivo));
+          const esPaciente = String(propio?.rol || '').trim().toLowerCase() === 'paciente';
+          if (esPaciente) {
+            const hoyISO = fechaLocalISO(new Date());
+            const claveCheckin = `ultimoCheckinAnimo_${idUsuarioActivo}`;
+            const ultimoCheckin = await AsyncStorage.getItem(claveCheckin);
+            if (ultimoCheckin !== hoyISO && isMounted) {
+              setModalAnimo(true);
+            }
+          }
+        }
+
+        const calendarioRespuesta = await fetch(`${API_URL}/api/calendar/group/${grupo.id_grupo}`);
+        const calendario = calendarioRespuesta.ok ? await calendarioRespuesta.json() : { eventos: [] };
+        const horariosRespuesta = await fetch(`${API_URL}/api/schedules/${grupo.id_grupo}`);
+        const horarios = horariosRespuesta.ok ? await horariosRespuesta.json() : { horariosCuidado: [], medicamentos: [] };
+        
+        if (!isMounted) return;
+
+        const ahora = new Date();
+        const limiteUnDia = new Date(ahora.getTime() + 24 * 60 * 60 * 1000);
+        const inicioDelDia = new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate());
+
+        const medicamento = (horarios.medicamentos || [])
+          .map((item) => ({ item, fechaHora: convertirFechaHora(item.fecha_inicio, item.hora_toma) }))
+          .filter(({ fechaHora }) => fechaHora && fechaHora >= ahora && fechaHora <= limiteUnDia)
+          .sort((a, b) => a.fechaHora - b.fechaHora)[0];
+
+        const cuidado = (horarios.horariosCuidado || [])
+          .map((item) => ({ item, inicio: convertirFechaHora(item.fecha_inicio, item.hora_inicio), fin: convertirFechaHora(item.fecha_fin, item.hora_fin) }))
+          .filter(({ inicio, fin }) => inicio && inicio >= inicioDelDia && fin && fin >= ahora && fin <= limiteUnDia)
+          .sort((a, b) => (a.inicio || a.fin) - (b.inicio || b.fin))[0];
+
+        const evento = (calendario.eventos || [])
+          .map((item) => ({ item, fechaHora: convertirFechaHora(item.fecha_evento, item.hora_evento) }))
+          .filter(({ fechaHora }) => fechaHora && fechaHora >= ahora && fechaHora <= limiteUnDia)
+          .sort((a, b) => a.fechaHora - b.fechaHora)[0];
+
+        const toma = medicamento?.item;
+        const turno = cuidado?.item;
+        const proximoEvento = evento?.item;
+
+        setDatosPantalla((actual) => ({
+          ...actual,
+          cuidadorActual: grupo.nombre_grupo,
+          proximaToma: toma ? `${horaSinSegundos(toma.hora_toma)} - ${toma.nombre_medicamento}: ${toma.dosis}` : 'no hay tomas registradas',
+          proximoCuidador: turno ? `${horaSinSegundos(turno.hora_inicio)} - ${horaSinSegundos(turno.hora_fin)} ${turno.encargado}` : 'No hay turnos registrados',
+          actividadProxima: proximoEvento ? `${formatoFecha(convertirFechaHora(proximoEvento.fecha_evento, proximoEvento.hora_evento))} - ${horaSinSegundos(proximoEvento.hora_evento)} - ${proximoEvento.nombre_evento}` : 'No hay eventos próximos',
+        }));
+      } catch (error) {
+        console.error('Error al cargar resumen:', error);
+      }
     };
 
-    cargarResumen().catch((error) => console.error('Error al cargar resumen:', error));
-  }, []);
+    cargarResumen();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [pathname]); // Se dispara y actualiza al instante cada vez que cambia la ruta de navegación
 
   const activarEmergencia = () => {
     Alert.alert('Emergencia', '¿Deseas notificar a todos los miembros del grupo?', [
@@ -112,8 +173,85 @@ export default function PantallaInicio() {
     ]);
   };
 
+  const marcarCheckinDeHoy = async () => {
+    if (!idUsuario) return;
+    await AsyncStorage.setItem(`ultimoCheckinAnimo_${idUsuario}`, fechaLocalISO(new Date()));
+  };
+
+  const omitirCheckinAnimo = async () => {
+    await marcarCheckinDeHoy();
+    setModalAnimo(false);
+    setAnimoSeleccionado(null);
+    setTextoAnimo('');
+  };
+
+  const guardarCheckinAnimo = async () => {
+    if (!animoSeleccionado) {
+      Alert.alert('Selecciona una opción', 'Elige el emoji que mejor represente cómo te sientes hoy.');
+      return;
+    }
+    setGuardandoAnimo(true);
+    try {
+      const opcion = ESCALA_ANIMO.find((o) => o.valor === animoSeleccionado);
+      const ahora = new Date();
+
+      const respuestaSintoma = await fetch(`${API_URL}/api/symptoms`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          idUsuario,
+          nombre_sintoma: 'Estado de ánimo',
+          descripcion: textoAnimo.trim() || opcion.etiqueta,
+          fecha_sintoma: fechaLocalISO(ahora),
+          hora_sintoma: horaSinSegundos(ahora.toTimeString()),
+        }),
+      });
+      const datosSintoma = await respuestaSintoma.json();
+      if (!respuestaSintoma.ok) throw new Error(datosSintoma.error || 'No se pudo guardar el estado de ánimo');
+
+      await marcarCheckinDeHoy();
+      setModalAnimo(false);
+      setAnimoSeleccionado(null);
+      setTextoAnimo('');
+
+      if (idGrupo) {
+        try {
+          const respuestaChat = await fetch(`${API_URL}/api/chat/group/${idGrupo}/messages`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              idUsuario,
+              tipo: 'texto',
+              texto: `${opcion.emoji} Estado de ánimo de hoy${textoAnimo.trim() ? `: ${textoAnimo.trim()}` : ''}`,
+              solo_cuidadores: true,
+            }),
+          });
+          if (!respuestaChat.ok) throw new Error('No se pudo compartir el estado de ánimo con cuidadores');
+        } catch (error) {
+          console.error('No se pudo publicar el estado de ánimo en el chat:', error.message);
+          Alert.alert('Estado guardado', 'Se guardó el check-in, pero no se pudo compartir en el chat.');
+        }
+      }
+    } catch (error) {
+      Alert.alert('Error', error.message || 'No se pudo guardar el estado de ánimo.');
+    } finally {
+      setGuardandoAnimo(false);
+    }
+  };
+
+  const abrirModalSintoma = () => {
+    if (!tienePaciente) {
+      Alert.alert('Atención', 'No hay un paciente asignado');
+      return;
+    }
+    setModalSintoma(true);
+  };
+
   const registrarSintoma = async () => {
-    if (!nombreSintoma.trim() || !descripcionSintoma.trim() || !/^\d{4}-\d{2}-\d{2}$/.test(fechaSintoma) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(horaSintoma)) {
+    const esFechaSintomaValida = /^\d{4}-\d{2}-\d{2}$/.test(fechaSintoma);
+    const esHoraSintomaValida = /^([01]\d|2[0-3]):[0-5]\d$/.test(horaSintoma);
+
+    if (!nombreSintoma.trim() || !descripcionSintoma.trim() || !esFechaSintomaValida || !esHoraSintomaValida) {
       Alert.alert('Datos incompletos', 'Completa síntoma, descripción, fecha (AAAA-MM-DD) y hora (HH:MM).');
       return;
     }
@@ -138,7 +276,6 @@ export default function PantallaInicio() {
   };
 
   return (
-    
     <SafeAreaView style={estilos.contenedor}>
       <ScrollView contentContainerStyle={estilos.contenidoScroll}>
         
@@ -172,7 +309,7 @@ export default function PantallaInicio() {
           <Text style={estilos.contenidoTarjeta}>{datosPantalla.proximoCuidador}</Text>
         </View>
 
-        <TouchableOpacity style={estilos.botonRegistrarSintomas} onPress={() => setModalSintoma(true)}>
+        <TouchableOpacity style={estilos.botonRegistrarSintomas} onPress={abrirModalSintoma}>
           <Text style={estilos.textoRegistrarSintomas}>REGISTRAR SÍNTOMAS</Text>
         </TouchableOpacity>
 
@@ -182,13 +319,63 @@ export default function PantallaInicio() {
               <Text style={estilos.tituloModal}>Registrar síntoma</Text>
               <TextInput style={estilos.inputSintoma} placeholder="Síntoma" value={nombreSintoma} onChangeText={setNombreSintoma} />
               <TextInput style={[estilos.inputSintoma, estilos.inputDescripcion]} placeholder="Breve descripción" value={descripcionSintoma} onChangeText={setDescripcionSintoma} multiline />
-              <TextInput style={estilos.inputSintoma} placeholder="Fecha (AAAA-MM-DD)" value={fechaSintoma} onChangeText={setFechaSintoma} />
-              <TextInput style={estilos.inputSintoma} placeholder="Hora (HH:MM)" value={horaSintoma} onChangeText={setHoraSintoma} />
+              <FormPickerInput
+                pickerType="date"
+                modalTitle="Fecha del síntoma"
+                style={estilos.inputSintoma}
+                placeholder="Fecha (AAAA-MM-DD)"
+                value={fechaSintoma}
+                onChangeText={setFechaSintoma}
+              />
+              <FormPickerInput
+                pickerType="time"
+                modalTitle="Hora del síntoma"
+                style={estilos.inputSintoma}
+                placeholder="Hora (HH:MM)"
+                value={horaSintoma}
+                onChangeText={setHoraSintoma}
+              />
               <TouchableOpacity style={estilos.botonGuardarSintoma} onPress={registrarSintoma} disabled={guardandoSintoma}>
                 <Text style={estilos.textoGuardarSintoma}>{guardandoSintoma ? 'Guardando...' : 'Guardar'}</Text>
               </TouchableOpacity>
               <TouchableOpacity style={estilos.botonCancelarSintoma} onPress={() => setModalSintoma(false)}>
                 <Text style={estilos.textoCancelarSintoma}>Cancelar</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
+
+        <Modal visible={modalAnimo} transparent animationType="fade" onRequestClose={omitirCheckinAnimo}>
+          <View style={estilos.fondoModal}>
+            <View style={estilos.modalAnimo}>
+              <TouchableOpacity style={estilos.botonCerrarAnimo} onPress={omitirCheckinAnimo}>
+                <Text style={estilos.textoCerrarAnimo}>✕</Text>
+              </TouchableOpacity>
+              <Text style={estilos.tituloModalAnimo}>¿Cómo se siente hoy?</Text>
+              <View style={estilos.filaEmojis}>
+                {ESCALA_ANIMO.map((opcion) => (
+                  <TouchableOpacity
+                    key={opcion.valor}
+                    style={[estilos.circuloEmoji, animoSeleccionado === opcion.valor && estilos.circuloEmojiActivo]}
+                    onPress={() => setAnimoSeleccionado(opcion.valor)}
+                  >
+                    <Text style={estilos.textoEmoji}>{opcion.emoji}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              <TextInput
+                style={estilos.inputAnimo}
+                placeholder="Agregar síntoma..."
+                placeholderTextColor="#999"
+                value={textoAnimo}
+                onChangeText={setTextoAnimo}
+                multiline
+              />
+              <TouchableOpacity style={estilos.botonGuardarAnimo} onPress={guardarCheckinAnimo} disabled={guardandoAnimo}>
+                <Text style={estilos.textoGuardarAnimo}>{guardandoAnimo ? 'GUARDANDO...' : 'GUARDAR'}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={omitirCheckinAnimo}>
+                <Text style={estilos.textoOmitirAnimo}>Omitir</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -345,5 +532,83 @@ const estilos = StyleSheet.create({
   },
   textoCancelarSintoma: {
     color: '#666666',
+  },
+  modalAnimo: {
+    width: '86%',
+    maxWidth: 360,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    padding: 24,
+    alignItems: 'center',
+  },
+  botonCerrarAnimo: {
+    position: 'absolute',
+    top: 12,
+    right: 12,
+    padding: 4,
+  },
+  textoCerrarAnimo: {
+    fontSize: 16,
+    color: '#333333',
+  },
+  tituloModalAnimo: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#111111',
+    textAlign: 'center',
+    marginBottom: 20,
+    marginTop: 8,
+  },
+  filaEmojis: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 12,
+    marginBottom: 20,
+  },
+  circuloEmoji: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: '#FFDE59',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  circuloEmojiActivo: {
+    borderWidth: 3,
+    borderColor: '#008B8B',
+  },
+  textoEmoji: {
+    fontSize: 26,
+  },
+  inputAnimo: {
+    width: '100%',
+    borderWidth: 1,
+    borderColor: '#CCCCCC',
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    minHeight: 60,
+    textAlignVertical: 'top',
+    color: '#222222',
+    marginBottom: 20,
+  },
+  botonGuardarAnimo: {
+    width: '100%',
+    backgroundColor: '#A8D8D0',
+    borderRadius: 20,
+    paddingVertical: 12,
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  textoGuardarAnimo: {
+    color: '#0A3D4C',
+    fontSize: 15,
+    fontWeight: 'bold',
+    letterSpacing: 0.5,
+  },
+  textoOmitirAnimo: {
+    color: '#60A5A3',
+    fontSize: 14,
+    fontWeight: '600',
   },
 });

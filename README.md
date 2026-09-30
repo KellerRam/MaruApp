@@ -54,3 +54,22 @@ Join our community of developers creating universal apps.
 
 - [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
 - [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+
+## Email verification for production
+
+Before deploying, run `database/email-verification-migration.sql` once against the app's PostgreSQL database. Configure these variables in the server environment (do not commit their values):
+
+- `SMTP_HOST`: SMTP server hostname.
+- `SMTP_PORT`: usually `465` for implicit TLS or `587` for STARTTLS.
+- `SMTP_SECURE`: `true` for port 465; `false` for port 587. If omitted, it is inferred from the port.
+- `SMTP_USER` and `SMTP_PASS`: SMTP account credentials. For Gmail, use an app password.
+- `SMTP_FROM`: sender address; defaults to `SMTP_USER`.
+- `OTP_SECRET`: a private random secret used to hash verification codes; if omitted, the server uses `JWT_SECRET`.
+
+`POST /api/auth/signup` creates a pending registration and emails a six-digit code. `POST /api/auth/request-code` resends it after 60 seconds. `POST /api/auth/verify` accepts up to five attempts; codes expire after 10 minutes. A successful verification remains valid for 30 minutes while the user completes their profile.
+
+## Backend security configuration
+
+In production, configure `CORS_ORIGINS` as a comma-separated list of exact web origins allowed to call the API (for example, `https://app.example.com`). Native clients do not need an Origin entry. The API requires a valid `Bearer` session token for private routes, and uploaded chat/finance files are served through signed links that expire after one hour. `JWT_SECRET` must be a private, high-entropy value shared by all server instances.
+
+Run the feature migrations required by the deployed version before starting the API, including `database/email-verification-migration.sql`, `database/manual-patient-migration.sql`, `database/apple-login-migration.sql`, `database/role-migration.sql`, `database/notifications-push-migration.sql`, `database/chat-migration.sql`, `database/mood-checkin-migration.sql`, and `database/symptom-emergency-migration.sql`.

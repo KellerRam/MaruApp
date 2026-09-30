@@ -1,26 +1,47 @@
 import { Feather, MaterialIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { usePathname, useRouter } from 'expo-router';
 import { Drawer } from 'expo-router/drawer';
 import { useEffect, useState } from 'react';
-import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { BackHandler, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { API_URL } from '../config/api';
+import { apiFetch as fetch } from '../config/apiFetch';
+import { cerrarSesion } from '../utils/session';
 
 function ContenidoMenuLateral(props) {
+  const router = useRouter();
+  const pathname = usePathname();
   const [usuario, setUsuario] = useState(null);
 
   useEffect(() => {
-    const cargarUsuario = async () => {
-      const idUsuario = await AsyncStorage.getItem('userId');
-      if (!idUsuario) return;
-      const respuesta = await fetch(`${API_URL}/api/auth/user/${idUsuario}`);
-      if (respuesta.ok) {
-        const datos = await respuesta.json();
-        setUsuario(datos.usuario);
+    let cancelado = false;
+    let temporizadorReintento = null;
+
+    const cargarUsuario = async (intento = 0) => {
+      try {
+        const idUsuario = await AsyncStorage.getItem('userId');
+        if (!idUsuario || cancelado) return;
+        const respuesta = await fetch(`${API_URL}/api/auth/user/${idUsuario}`);
+        if (respuesta.ok) {
+          const datos = await respuesta.json();
+          if (!cancelado) setUsuario(datos.usuario);
+        }
+      } catch (error) {
+        // Reintenta una vez: el backend puede tardar en aceptar conexiones al iniciar
+        if (intento < 1 && !cancelado) {
+          temporizadorReintento = setTimeout(() => cargarUsuario(intento + 1), 1500);
+          return;
+        }
+        console.error('Error al cargar el perfil en el menú:', error);
       }
     };
 
-    cargarUsuario().catch((error) => console.error('Error al cargar el perfil:', error));
-  }, []);
+    cargarUsuario();
+    return () => {
+      cancelado = true;
+      if (temporizadorReintento) clearTimeout(temporizadorReintento);
+    };
+  }, [pathname]); // Se recarga cada vez que cambias de pantalla o abres el menú
 
   const nombreUsuario = usuario?.nombre_usuario || 'Cargando perfil...';
   const inicialAvatar = nombreUsuario.charAt(0).toUpperCase();
@@ -33,22 +54,41 @@ function ContenidoMenuLateral(props) {
         </View>
         <View style={estilosMenu.infoUsuario}>
           <Text style={estilosMenu.nombreUsuario}>{nombreUsuario}</Text>
-          <TouchableOpacity style={estilosMenu.infousuario} href="/UserProfileScreen">  
-          <Feather size={20} color="#333" style={estilosMenu.iconoOpcion} />
-          <Text style={estilosMenu.textoVerPerfil}>Ver perfil</Text>
+          <TouchableOpacity 
+            style={estilos.enlacePerfil} 
+            onPress={() => {
+              props.navigation.closeDrawer();
+              router.push('/UserProfileScreen');
+            }}
+          >  
+            <Text style={estilosMenu.textoVerPerfil}>Ver perfil</Text>
           </TouchableOpacity>
         </View>
       </View>
 
       <View style={estilosMenu.cuerpoMenu}>
-        <TouchableOpacity style={estilosMenu.opcionItem} href="/NotificationSettingsScreen">
+        <TouchableOpacity 
+          style={estilosMenu.opcionItem} 
+          onPress={() => {
+            props.navigation.closeDrawer();
+            router.push('/NotificationSettingsScreen');
+          }}
+        >
           <Feather name="bell" size={20} color="#333" style={estilosMenu.iconoOpcion} />
           <Text style={estilosMenu.textoOpcion}>Gestionar notificaciones</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={estilosMenu.opcionItem}>
+
+        <TouchableOpacity 
+          style={estilosMenu.opcionItem}
+          onPress={() => {
+            props.navigation.closeDrawer();
+            router.push('/SymptomHistoryScreen');
+          }}
+        >
           <MaterialIcons name="fact-check" size={20} color="#333" style={estilosMenu.iconoOpcion} />
           <Text style={estilosMenu.textoOpcion}>Historial de síntomas</Text>
         </TouchableOpacity>
+
         <TouchableOpacity style={estilosMenu.opcionItem}>
           <Feather name="file-text" size={20} color="#333" style={estilosMenu.iconoOpcion} />
           <Text style={estilosMenu.textoOpcion}>Permisos de la aplicación</Text>
@@ -56,7 +96,11 @@ function ContenidoMenuLateral(props) {
       </View>
 
       <View style={estilosMenu.pieMenu}>
-        <TouchableOpacity>
+        <TouchableOpacity onPress={async () => {
+          await cerrarSesion();
+          props.navigation.closeDrawer();
+          router.replace('/');
+        }}>
           <Text style={estilosMenu.textoCerrarSesion}>Cerrar Sesión</Text>
         </TouchableOpacity>
       </View>
@@ -65,6 +109,21 @@ function ContenidoMenuLateral(props) {
 }
 
 export default function RootLayout() {
+  const router = useRouter();
+  const pathname = usePathname();
+
+  useEffect(() => {
+    if (Platform.OS !== 'android') return undefined;
+
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (pathname === '/') return false;
+      router.replace('/');
+      return true;
+    });
+
+    return () => subscription.remove();
+  }, [pathname, router]);
+
   return (
     <Drawer
       drawerContent={(props) => <ContenidoMenuLateral {...props} />}
@@ -73,6 +132,9 @@ export default function RootLayout() {
       }}
     >
       <Drawer.Screen name="(tabs)" options={{ drawerLabel: 'Inicio' }} />
+      <Drawer.Screen name="SymptomHistoryScreen" options={{ drawerItemStyle: { display: 'none' } }} />
+      <Drawer.Screen name="UserProfileScreen" options={{ drawerItemStyle: { display: 'none' } }} />
+      <Drawer.Screen name="NotificationSettingsScreen" options={{ drawerItemStyle: { display: 'none' } }} />
       <Drawer.Screen name="ChatScreen" options={{ drawerItemStyle: { display: 'none' } }} />
       <Drawer.Screen name="index" options={{ drawerItemStyle: { display: 'none' } }} />
       <Drawer.Screen name="login" options={{ drawerItemStyle: { display: 'none' }, swipeEnabled: false }} />
@@ -97,4 +159,8 @@ const estilosMenu = StyleSheet.create({
   textoOpcion: { fontSize: 14, color: '#222222', fontWeight: '500' },
   pieMenu: { borderTopWidth: 1, borderTopColor: '#E0E0E0', paddingTop: 20, alignItems: 'flex-start' },
   textoCerrarSesion: { fontSize: 14, color: '#3B7A8C', fontWeight: '600', textDecorationLine: 'underline' },
+});
+
+const estilos = StyleSheet.create({
+  enlacePerfil: { marginTop: 2 }
 });

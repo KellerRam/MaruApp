@@ -1,0 +1,2 @@
+ALTER TABLE usuario
+  ALTER COLUMN correo DROP NOT NULL;

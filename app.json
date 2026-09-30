@@ -8,6 +8,9 @@
     "scheme": "appmaru",
     "userInterfaceStyle": "automatic",
     "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.maruapp",
+      "usesAppleSignIn": true,
       "icon": "./assets/expo.icon"
     },
     "android": {
@@ -25,6 +28,7 @@
     },
     "plugins": [
       "expo-router",
+      "expo-apple-authentication",
       [
         "expo-image-picker",
         {
@@ -41,7 +45,20 @@
       ],
       "expo-secure-store",
       "expo-sharing",
-      "expo-audio"
+      "expo-audio",
+      "@react-native-community/datetimepicker",
+      [
+        "expo-notifications",
+        {
+          "enableBackgroundRemoteNotifications": true
+        }
+      ],
+      [
+        "expo-sensors",
+        {
+          "motionPermission": "Maru necesita acceso al movimiento del dispositivo para detectar sacudidas de emergencia."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

@@ -1,49 +1,70 @@
 import { Feather, MaterialIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Clipboard from 'expo-clipboard';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
-  Alert,
-  FlatList,
-  Modal,
-  SafeAreaView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View
+    Alert,
+    FlatList,
+    Modal,
+    SafeAreaView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from 'react-native';
+
 import QRCode from 'react-native-qrcode-svg';
 import { API_URL } from '../../config/api';
+import { apiFetch as fetch } from '../../config/apiFetch';
 
 export default function PantallaGrupo() {
+  const montadaRef = useRef(false);
   const [miembros, setMiembros] = useState([]);
   const [idGrupo, setIdGrupo] = useState(null);
   const [idUsuarioActivo, setIdUsuarioActivo] = useState(null);
   const [miembroParaRol, setMiembroParaRol] = useState(null);
   const [invitacion, setInvitacion] = useState(null);
+  const [mostrarPacienteManual, setMostrarPacienteManual] = useState(false);
+  const [nombrePaciente, setNombrePaciente] = useState('');
+  const [generoPaciente, setGeneroPaciente] = useState('Otro');
+  const [fechaNacimientoPaciente, setFechaNacimientoPaciente] = useState('');
+  const [guardandoPaciente, setGuardandoPaciente] = useState(false);
 
-  useEffect(() => {
-    const cargarMiembros = async () => {
+  // Función reutilizable para cargar los miembros del grupo
+  const cargarMiembros = async () => {
+    try {
       const idUsuario = await AsyncStorage.getItem('userId');
-      if (!idUsuario) return;
+      if (!idUsuario || !montadaRef.current) return;
       setIdUsuarioActivo(Number(idUsuario));
 
       const grupoRespuesta = await fetch(`${API_URL}/api/groups/user/${idUsuario}`);
-      if (!grupoRespuesta.ok) return;
+      if (!grupoRespuesta.ok || !montadaRef.current) return;
       const grupoDatos = await grupoRespuesta.json();
-      const idGrupo = grupoDatos.grupo?.id_grupo?.toString();
-      if (!idGrupo) return;
-      await AsyncStorage.setItem('groupId', idGrupo);
-      setIdGrupo(idGrupo);
+      const idGrp = grupoDatos.grupo?.id_grupo?.toString();
+      if (!idGrp || !montadaRef.current) return;
+      
+      await AsyncStorage.setItem('groupId', idGrp);
+      setIdGrupo(idGrp);
 
-      const respuesta = await fetch(`${API_URL}/api/groups/${idGrupo}/members`);
+      const respuesta = await fetch(`${API_URL}/api/groups/${idGrp}/members`);
+      if (!montadaRef.current) return;
       if (respuesta.ok) {
         const datos = await respuesta.json();
-        setMiembros(datos.miembros || []);
+        setMiembros(Array.isArray(datos.miembros) ? datos.miembros : []);
+      } else {
+        setMiembros([]);
       }
-    };
+      
+    } catch (error) {
+      console.error('Error al cargar miembros:', error);
+    }
+  };
 
-    cargarMiembros().catch((error) => console.error('Error al cargar miembros:', error));
+  useEffect(() => {
+    montadaRef.current = true;
+    cargarMiembros();
+    return () => { montadaRef.current = false; };
   }, []);
 
   const cambiarRol = (id, nombre) => {
@@ -58,6 +79,7 @@ export default function PantallaGrupo() {
         body: JSON.stringify({ idUsuario: idUsuarioActivo }),
       });
       const datos = await respuesta.json();
+      if (!montadaRef.current) return;
       if (!respuesta.ok) {
         Alert.alert('No se pudo generar la invitación', datos.error || 'Intenta nuevamente');
         return;
@@ -71,12 +93,69 @@ export default function PantallaGrupo() {
     }
   };
 
+  const seleccionarTipoMiembro = () => {
+    Alert.alert('Agregar miembro', 'Selecciona cómo agregarlo', [
+      { text: 'Invitar por enlace', onPress: generarInvitacion },
+      { text: 'Agregar paciente manualmente', onPress: () => setMostrarPacienteManual(true) },
+      { text: 'Cancelar', style: 'cancel' }
+    ]);
+  };
+
+  const guardarPacienteManual = async () => {
+    if (!nombrePaciente.trim() || !fechaNacimientoPaciente.trim()) {
+      Alert.alert('Datos incompletos', 'Ingresa el nombre y la fecha de nacimiento del paciente.');
+      return;
+    }
+    if (!idGrupo || !idUsuarioActivo) {
+      Alert.alert('Error', 'No se pudo identificar el grupo o tu sesión.');
+      return;
+    }
+
+    setGuardandoPaciente(true);
+    try {
+      const respuesta = await fetch(`${API_URL}/api/groups/${idGrupo}/patients/manual`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          idUsuario: idUsuarioActivo,
+          nombre: nombrePaciente,
+          genero: generoPaciente,
+          fechaNacimiento: fechaNacimientoPaciente.trim()
+        })
+      });
+      const datos = await respuesta.json();
+      if (!respuesta.ok) {
+        Alert.alert('No se pudo agregar', datos.error || 'Intenta nuevamente');
+        return;
+      }
+
+      setMostrarPacienteManual(false);
+      setNombrePaciente('');
+      setGeneroPaciente('Otro');
+      setFechaNacimientoPaciente('');
+      await cargarMiembros();
+    } catch (error) {
+      Alert.alert('Error de conexión', 'No se pudo agregar al paciente');
+    } finally {
+      setGuardandoPaciente(false);
+    }
+  };
+
+  const seleccionarGeneroPaciente = () => {
+    Alert.alert('Género del paciente', undefined, [
+      ...['Masculino', 'Femenino', 'Otro'].map((genero) => ({
+        text: genero,
+        onPress: () => setGeneroPaciente(genero)
+      }))
+    ]);
+  };
+
   const copiarInvitacion = async () => {
     await Clipboard.setStringAsync(invitacion);
     Alert.alert('Enlace copiado', 'Puedes compartirlo con el nuevo miembro');
   };
 
-  const actualizarRol = async (idUsuario, nuevoRol) => {
+const actualizarRol = async (idUsuario, nuevoRol) => {
     if (!idGrupo) return;
     try {
       const respuesta = await fetch(`${API_URL}/api/groups/${idGrupo}/members/${idUsuario}/role`, {
@@ -84,17 +163,26 @@ export default function PantallaGrupo() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ rol: nuevoRol }),
       });
-      const datos = await respuesta.json();
+
+      const textoRespuesta = await respuesta.text();
+      let datos;
+      try {
+        datos = JSON.parse(textoRespuesta);
+      } catch (e) {
+        throw new Error(`El servidor respondió con un formato inválido: ${textoRespuesta.substring(0, 100)}`);
+      }
+
       if (!respuesta.ok) {
-        Alert.alert('No se pudo asignar el rol', datos.error || 'Intenta nuevamente');
+        Alert.alert('Aviso', datos.error || 'No se pudo asignar el rol');
         return;
       }
-      setMiembros((prev) => prev.map((miembro) => (
-        miembro.id_usuario === idUsuario ? { ...miembro, rol: nuevoRol } : miembro
-      )));
+      
       setMiembroParaRol(null);
+      await cargarMiembros();
+      Alert.alert('Éxito', 'Rol actualizado correctamente');
     } catch (error) {
-      Alert.alert('Error de conexión', 'No se pudo actualizar el rol');
+      console.error('Error detallado:', error);
+      Alert.alert('Error', error.message);
     }
   };
 
@@ -169,17 +257,22 @@ export default function PantallaGrupo() {
 
       <View style={estilos.seccionTitulo}>
         <Text style={estilos.tituloPrincipal}>Miembros Actuales</Text>
-        <TouchableOpacity onPress={generarInvitacion}>
+        <TouchableOpacity onPress={seleccionarTipoMiembro}>
           <Text style={estilos.enlaceAgregar}>+ agregar miembro</Text>
         </TouchableOpacity>
       </View>
 
       <FlatList
-        data={miembros}
-        keyExtractor={(item) => item.id_usuario.toString()}
+        data={Array.isArray(miembros) ? miembros.filter(m => m && m.id_usuario != null) : []}
+        keyExtractor={(item, index) => (item?.id_usuario ? String(item.id_usuario) : `miembro-${index}`)}
         renderItem={renderizarMiembro}
         contentContainerStyle={estilos.listaContenedor}
         showsVerticalScrollIndicator={false}
+        ListEmptyComponent={
+          <Text style={{ textAlign: 'center', color: '#666', marginTop: 20 }}>
+            No hay miembros registrados en este grupo.
+          </Text>
+        }
       />
 
       <Modal
@@ -228,6 +321,47 @@ export default function PantallaGrupo() {
         </View>
       </Modal>
 
+      <Modal
+        visible={mostrarPacienteManual}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setMostrarPacienteManual(false)}
+      >
+        <View style={estilos.fondoModal}>
+          <View style={estilos.modalInvitacion}>
+            <Text style={estilos.tituloModal}>Agregar paciente</Text>
+            <Text style={estilos.enlaceInvitacion}>Este perfil no requiere correo ni acceso desde un celular.</Text>
+            <TextInput
+              style={estilos.entradaPaciente}
+              placeholder="Nombre completo"
+              value={nombrePaciente}
+              onChangeText={setNombrePaciente}
+              maxLength={100}
+            />
+            <TouchableOpacity style={estilos.opcionModal} onPress={seleccionarGeneroPaciente}>
+              <Text style={estilos.textoOpcionModal}>Género: {generoPaciente}</Text>
+            </TouchableOpacity>
+            <TextInput
+              style={estilos.entradaPaciente}
+              placeholder="Fecha de nacimiento (AAAA-MM-DD)"
+              value={fechaNacimientoPaciente}
+              onChangeText={setFechaNacimientoPaciente}
+              maxLength={10}
+            />
+            <TouchableOpacity
+              style={estilos.opcionModal}
+              onPress={guardarPacienteManual}
+              disabled={guardandoPaciente}
+            >
+              <Text style={estilos.textoOpcionModal}>{guardandoPaciente ? 'Guardando...' : 'Agregar paciente'}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={estilos.cancelarModal} onPress={() => setMostrarPacienteManual(false)}>
+              <Text style={estilos.textoCancelarModal}>Cancelar</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
     </SafeAreaView>
   );
 }
@@ -237,23 +371,10 @@ const estilos = StyleSheet.create({
     flex: 1,
     backgroundColor: '#FFFFFF',
   },
-  encabezado: {
-    paddingHorizontal: 20,
-    paddingTop: 20,
-    marginBottom: 20,
-    alignItems: 'flex-start',
-  },
-  botonMenu: {
-    backgroundColor: '#60A5A3',
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
   seccionTitulo: {
     paddingHorizontal: 20,
     marginBottom: 16,
+    marginTop: 20,
   },
   tituloPrincipal: {
     fontSize: 24,
@@ -327,6 +448,7 @@ const estilos = StyleSheet.create({
   modalInvitacion: { width: '82%', maxWidth: 340, backgroundColor: '#FFF', borderRadius: 16, padding: 20, alignItems: 'center' },
   tituloModal: { fontSize: 18, fontWeight: 'bold', color: '#111', marginBottom: 4 },
   enlaceInvitacion: { color: '#666', fontSize: 12, textAlign: 'center', marginVertical: 14 },
+  entradaPaciente: { alignSelf: 'stretch', borderWidth: 1, borderColor: '#CCCCCC', borderRadius: 10, padding: 12, marginBottom: 10 },
   nombreModal: { color: '#666', marginBottom: 14 },
   opcionModal: { borderWidth: 1, borderColor: '#60A5A3', borderRadius: 10, padding: 12, marginBottom: 10, alignItems: 'center' },
   textoOpcionModal: { color: '#087A7A', fontSize: 15, fontWeight: '600' },

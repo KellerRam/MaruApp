@@ -2,8 +2,9 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
-import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { API_URL } from '../config/api';
+import { apiFetch as fetch } from '../config/apiFetch';
 
 export default function SignupScreen() {
   const router = useRouter();
@@ -18,17 +19,17 @@ export default function SignupScreen() {
   const [mes, setMes] = useState('');
   const [anio, setAnio] = useState('');
 
-  const solicitarCodigo = async () => {
-    if (!email.trim() || !password.trim()) {
-      alert('Por favor, ingresa correo y contraseña.');
+  const solicitarCodigo = async (reenviar = false) => {
+    if (!email.trim() || (!reenviar && !password.trim())) {
+      alert(reenviar ? 'No se encontró el correo de registro.' : 'Por favor, ingresa correo y contraseña.');
       return;
     }
 
     try {
-      const respuesta = await fetch(`${API_URL}/api/auth/signup`, {
+      const respuesta = await fetch(`${API_URL}/api/auth/${reenviar ? 'request-code' : 'signup'}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password })
+        body: JSON.stringify(reenviar ? { email } : { email, password })
       });
       const datos = await respuesta.json();
       if (respuesta.ok) {
@@ -43,7 +44,7 @@ export default function SignupScreen() {
 
   const verificarCodigo = async () => {
     if (!codigoUnico.trim()) {
-      alert('Ingresa el código de verificación (Usa 1234)');
+      alert('Ingresa el código de verificación que enviamos a tu correo.');
       return;
     }
 
@@ -92,8 +93,19 @@ export default function SignupScreen() {
 
   return (
     <ScrollView style={estilos.contenedor} contentContainerStyle={estilos.scrollContent}>
+      
+      {/* Botón superior para regresar al login */}
+      <TouchableOpacity style={estilos.botonRegresar} onPress={() => router.replace('/login')}>
+        <Text style={estilos.textoRegresar}>← Regresar</Text>
+      </TouchableOpacity>
+
+      {/* Contenedor del Logo con Imagen */}
       <View style={estilos.contenedorLogo}>
-        <Text style={estilos.textoLogo}>LOGO</Text>
+        <Image 
+          source={require('../../assets/images/logo.png')} 
+          style={estilos.imagenLogo} 
+          resizeMode="contain" 
+        />
       </View>
 
       {paso === 1 && (
@@ -116,12 +128,12 @@ export default function SignupScreen() {
       {paso === 2 && (
         <>
           <Text style={estilos.tituloSeccion}>Verifica tu correo</Text>
-          <Text style={estilos.subtitulo}>Ingresa el código de prueba: 1234</Text>
+          <Text style={estilos.subtitulo}>Ingresa el código que enviamos a tu correo.</Text>
           <View style={estilos.grupoInput}>
-            <Text style={estilos.etiqueta}>Código de 4 dígitos</Text>
+            <Text style={estilos.etiqueta}>Código de 6 dígitos</Text>
             <TextInput 
               style={[estilos.input, { textAlign: 'center', fontSize: 22, letterSpacing: 8 }]} 
-              maxLength={4} 
+              maxLength={6}
               keyboardType="number-pad" 
               value={codigoUnico} 
               onChangeText={setCodigoUnico} 
@@ -129,6 +141,9 @@ export default function SignupScreen() {
           </View>
           <TouchableOpacity style={estilos.botonPrimario} onPress={verificarCodigo}>
             <Text style={estilos.textoBotonPrimario}>Verificar código</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => solicitarCodigo(true)} style={{ alignItems: 'center', marginTop: 4 }}>
+            <Text style={{ color: '#0A3D4C', fontWeight: '600' }}>Reenviar código</Text>
           </TouchableOpacity>
         </>
       )}
@@ -173,8 +188,13 @@ export default function SignupScreen() {
 const estilos = StyleSheet.create({
   contenedor: { flex: 1, backgroundColor: '#FFFFFF' },
   scrollContent: { padding: 24, justifyContent: 'center', minHeight: '100%' },
-  contenedorLogo: { height: 90, borderWidth: 2, borderColor: '#A8D8D0', borderRadius: 12, justifyContent: 'center', alignItems: 'center', marginBottom: 25, backgroundColor: '#F9FBFB' },
-  textoLogo: { fontSize: 32, fontWeight: 'bold', color: '#60A5A3', letterSpacing: 4 },
+  
+  botonRegresar: { marginBottom: 15 },
+  textoRegresar: { color: '#0A3D4C', fontSize: 18, fontWeight: '600' },
+
+  contenedorLogo: { height: 110, justifyContent: 'center', alignItems: 'center', marginBottom: 20 },
+  imagenLogo: { width: '75%', height: '100%' },
+
   tituloSeccion: { fontSize: 20, fontWeight: 'bold', color: '#111', marginBottom: 15, textAlign: 'center' },
   subtitulo: { fontSize: 13, color: '#666', textAlign: 'center', marginBottom: 20 },
   grupoInput: { marginBottom: 16 },

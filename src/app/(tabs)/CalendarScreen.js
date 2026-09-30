@@ -3,19 +3,21 @@ import { Feather } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
-  Alert,
-  FlatList,
-  Modal,
-  SafeAreaView,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Alert,
+    FlatList,
+    Modal,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import FormPickerInput from '../../components/ui/FormPickerInput';
 import { API_URL } from '../../config/api';
+import { apiFetch as fetch } from '../../config/apiFetch';
 
 const NOMBRES_MESES = [
   'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
@@ -102,6 +104,7 @@ const generarLoteMeses = (mesInicio, anioInicio, cantidadMeses = 12) => {
 };
 
 export default function PantallaCalendario() {
+  const montadaRef = useRef(false);
   const [fechaActual, setFechaActual] = useState(new Date());
 
   const diaHoy = fechaActual.getDate();
@@ -135,7 +138,6 @@ export default function PantallaCalendario() {
 
   const [tipoGestion, setTipoGestion] = useState('cuidado');
 
-  // Campos Horario Cuidado (Modificados para Hora Inicio y Hora Fin intuitivas)
   const [encargadoCuidado, setEncargadoCuidado] = useState('');
   const [horaInicioCuidado, setHoraInicioCuidado] = useState('08:00');
   const [horaFinCuidado, setHoraFinCuidado] = useState('16:00');
@@ -146,6 +148,8 @@ export default function PantallaCalendario() {
   const [presentacionMed, setPresentacionMed] = useState('');
   const [frecuenciaMed, setFrecuenciaMed] = useState('Cada 8 horas');
   const [horaTomaMed, setHoraTomaMed] = useState('16:00');
+  const [intervaloMed, setIntervaloMed] = useState('8');      // <--- Agrégalo aquí
+  const [repeticionesMed, setRepeticionesMed] = useState('3'); // <--- Agrégalo aquí
 
   const [nombreEvento, setNombreEvento] = useState('');
   const [horaEvento, setHoraEvento] = useState('16:00');
@@ -154,6 +158,15 @@ export default function PantallaCalendario() {
   const [guardandoHorario, setGuardandoHorario] = useState(false);
   const [errorFormulario, setErrorFormulario] = useState('');
 
+  useEffect(() => {
+    montadaRef.current = true;
+    return () => { montadaRef.current = false; };
+  }, []);
+
+  const fechaHoyISO = formatearFechaISO(fechaActual);
+  const horaActualStr = `${String(fechaActual.getHours()).padStart(2, '0')}:${String(fechaActual.getMinutes()).padStart(2, '0')}`;
+  const esFechaFormularioHoy = fechaFormulario === fechaHoyISO;
+
   const cargarCuidadores = async (grupoId) => {
     const respuesta = await fetch(`${API_URL}/api/groups/${grupoId}/members`);
     if (!respuesta.ok) {
@@ -161,6 +174,7 @@ export default function PantallaCalendario() {
     }
 
     const datos = await respuesta.json();
+    if (!montadaRef.current) return [];
     const cuidadores = (datos.miembros || []).filter(
       (miembro) => String(miembro.rol || '').trim().toLowerCase() === 'cuidador'
     );
@@ -178,7 +192,9 @@ export default function PantallaCalendario() {
     setDosisMed('');
     setPresentacionMed('');
     setFrecuenciaMed('Cada 8 horas');
-    setHoraTomaMed('16:00');
+    setHoraTomaMed('08:00');
+    setIntervaloMed('8');
+    setRepeticionesMed('3');
     setNombreEvento('');
     setHoraEvento('16:00');
     setFechaFormulario(fecha);
@@ -200,14 +216,18 @@ export default function PantallaCalendario() {
   }, [fechaActual]);
 
   const cargarDatosServidor = useCallback(async () => {
+    if (!montadaRef.current) return;
     try {
       setCargandoDatos(true);
       let grupoId = null;
       const idUsuario = await AsyncStorage.getItem('userId');
+      if (!montadaRef.current) return;
       if (idUsuario) {
         const userGroupRes = await fetch(`${API_URL}/api/groups/user/${idUsuario}`);
+        if (!montadaRef.current) return;
         if (userGroupRes.ok) {
           const ugData = await userGroupRes.json();
+          if (!montadaRef.current) return;
           if (ugData.tieneGrupo && ugData.grupo?.id_grupo) {
             grupoId = ugData.grupo.id_grupo.toString();
             await AsyncStorage.setItem('groupId', grupoId);
@@ -216,22 +236,27 @@ export default function PantallaCalendario() {
       }
 
       if (!grupoId) {
-        setErrorFormulario('No se encontró un grupo asociado al usuario');
+        if (montadaRef.current) setErrorFormulario('No se encontró un grupo asociado al usuario');
         return;
       }
 
+      if (!montadaRef.current) return;
       setIdGrupo(grupoId);
 
       const respuesta = await fetch(`${API_URL}/api/calendar/group/${grupoId}`);
+      if (!montadaRef.current) return;
       if (respuesta.ok) {
         const datos = await respuesta.json();
+        if (!montadaRef.current) return;
         setIdCalendario(datos.id_calendario);
         setEventos(datos.eventos || []);
       }
 
       const resHorarios = await fetch(`${API_URL}/api/schedules/${grupoId}`);
+      if (!montadaRef.current) return;
       if (resHorarios.ok) {
         const datosH = await resHorarios.json();
+        if (!montadaRef.current) return;
         setHorariosCuidado(datosH.horariosCuidado || []);
         setHorariosMedicamentos(datosH.medicamentos || []);
       }
@@ -240,7 +265,7 @@ export default function PantallaCalendario() {
     } catch (error) {
       console.error('Error al cargar datos de la agenda:', error);
     } finally {
-      setCargandoDatos(false);
+      if (montadaRef.current) setCargandoDatos(false);
     }
   }, []);
 
@@ -356,7 +381,6 @@ export default function PantallaCalendario() {
     }
   };
 
-  // Lógica para calcular la fecha fin, verificar cruces y límite de 24 horas
   const calcularFechasTurno = () => {
     const [anioF, mesF, diaF] = fechaFormulario.split('-').map(Number);
     const [hI, mI] = horaInicioCuidado.split(':').map(Number);
@@ -365,7 +389,6 @@ export default function PantallaCalendario() {
     const inicio = new Date(anioF, mesF - 1, diaF, hI, mI, 0);
     let fin = new Date(anioF, mesF - 1, diaF, hF, mF, 0);
 
-    // Si la hora fin es menor o igual a la hora inicio, asume que cruza a la medianoche del día siguiente
     if (fin <= inicio) {
       fin.setDate(fin.getDate() + 1);
     }
@@ -383,6 +406,33 @@ export default function PantallaCalendario() {
       setErrorFormulario('No se encontró el Grupo asignado');
       return;
     }
+
+    // --- VALIDACIÓN ESTRICTA DE FECHA Y HORA PASADA ---
+    const fechaAValidar = tipoGestion === 'evento' ? fechaEvento : fechaFormulario;
+    const horaAValidar = tipoGestion === 'cuidado' ? horaInicioCuidado : tipoGestion === 'medicamento' ? horaTomaMed : horaEvento;
+
+    const ahora = new Date();
+    const [anioF, mesF, diaF] = fechaAValidar.split('-').map(Number);
+    const fechaSeleccionadaObj = new Date(anioF, mesF - 1, diaF, 0, 0, 0, 0);
+    const inicioHoyObj = new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate(), 0, 0, 0, 0);
+
+    if (fechaSeleccionadaObj < inicioHoyObj && !registroEditando) {
+      setErrorFormulario('No se pueden programar horarios o eventos en fechas pasadas.');
+      return;
+    }
+
+    const esHoy = fechaSeleccionadaObj.getTime() === inicioHoyObj.getTime();
+    if (esHoy && horaAValidar && !registroEditando) {
+      const [hInput, mInput] = horaAValidar.split(':').map(Number);
+      const minutosIngresados = hInput * 60 + mInput;
+      const minutosActuales = ahora.getHours() * 60 + ahora.getMinutes();
+
+      if (minutosIngresados < minutosActuales) {
+        setErrorFormulario('No puedes programar un registro en una hora que ya pasó el día de hoy.');
+        return;
+      }
+    }
+    // ------------------------------------------------
 
     try {
       setGuardandoHorario(true);
@@ -403,7 +453,6 @@ export default function PantallaCalendario() {
 
         const { inicio, fin, diffHoras } = calcularFechasTurno();
 
-        // Validación: Ningún turno puede ser de más de 24 horas
         if (diffHoras > 24) {
           setErrorFormulario('Ningún turno puede exceder las 24 horas de duración.');
           setGuardandoHorario(false);
@@ -413,9 +462,7 @@ export default function PantallaCalendario() {
         const cuidadorNum = Number(encargadoCuidado);
         const editId = registroEditando ? registroEditando.id_horario_cuidado : null;
 
-        // Validación de traslapos de turnos en el frontend
         const solapado = horariosCuidado.some((t) => {
-          if (Number(t.id_cuidador) !== cuidadorNum) return false;
           if (editId && t.id_horario_cuidado === editId) return false;
 
           const [a1, m1, d1] = String(t.fecha_inicio || '').split('T')[0].split('-').map(Number);
@@ -433,7 +480,7 @@ export default function PantallaCalendario() {
         });
 
         if (solapado) {
-          setErrorFormulario('El cuidador ya tiene un turno registrado que se cruza con este horario.');
+          setErrorFormulario('Ya existe un turno del grupo que se cruza con este horario.');
           setGuardandoHorario(false);
           return;
         }
@@ -451,8 +498,8 @@ export default function PantallaCalendario() {
           hora_fin: horaFinStr,
         };
       } else if (tipoGestion === 'medicamento') {
-        if (!nombreMed.trim() || !dosisMed.trim() || !presentacionMed.trim() || !horaTomaMed.trim()) {
-          setErrorFormulario('Completa todos los campos del medicamento');
+        if (!nombreMed.trim() || !dosisMed.trim() || !presentacionMed.trim() || !horaTomaMed.trim() || !fechaFormulario) {
+          setErrorFormulario('Completa todos los campos obligatorios del medicamento y su fecha');
           setGuardandoHorario(false);
           return;
         }
@@ -465,6 +512,8 @@ export default function PantallaCalendario() {
           frecuencia: frecuenciaMed.trim(),
           hora_toma: horaTomaMed.trim(),
           fecha_inicio: fechaFormulario,
+          intervalo_horas: intervaloMed,
+          repeticiones: repeticionesMed,
         };
       } else {
         if (!nombreEvento.trim() || !/^([01]\d|2[0-3]):[0-5]\d$/.test(horaEvento) || !/^\d{4}-\d{2}-\d{2}$/.test(fechaEvento)) {
@@ -489,6 +538,7 @@ export default function PantallaCalendario() {
           endpoint = `${API_URL}/api/schedules/cuidado/${registroEditando.id_horario_cuidado}`;
           const { inicio, fin } = calcularFechasTurno();
           bodyData = {
+            id_grupo: idGrupo,
             id_cuidador: Number(encargadoCuidado),
             fecha_inicio: fechaFormulario,
             fecha_fin: `${fin.getFullYear()}-${String(fin.getMonth() + 1).padStart(2, '0')}-${String(fin.getDate()).padStart(2, '0')}`,
@@ -501,6 +551,7 @@ export default function PantallaCalendario() {
             nombre_medicamento: nombreMed.trim(), dosis: dosisMed.trim(),
             presentacion: presentacionMed.trim(), frecuencia: frecuenciaMed.trim(),
             hora_toma: horaTomaMed.trim(), fecha_inicio: fechaFormulario,
+            intervalo_horas: intervaloMed, repeticiones: repeticionesMed,
           };
         }
       }
@@ -516,8 +567,8 @@ export default function PantallaCalendario() {
       if (respuesta.ok) {
         setModalGestionHorario(false);
         limpiarFormularioGestion();
-        cargarDatosServidor();
-        Alert.alert('Éxito', 'Horario registrado correctamente en la base de datos');
+        await cargarDatosServidor();
+        Alert.alert('Éxito', 'Información actualizada correctamente');
       } else {
         setErrorFormulario(datos.error || 'Error al guardar el horario');
       }
@@ -542,20 +593,31 @@ export default function PantallaCalendario() {
   };
 
   const obtenerEventoPequenoDinamico = () => {
-    const hoyISO = formatearFechaISO(fechaActual);
-    const evsHoy = obtenerEventosDeFecha(hoyISO);
-    if (evsHoy.length > 0) {
-      return evsHoy[0].nombre_evento;
-    }
+    const ahora = new Date();
+    const todosLosRegistros = [
+      ...eventos.map(e => ({ titulo: e.nombre_evento, fechaStr: e.fecha_evento, horaStr: e.hora_evento })),
+      ...horariosMedicamentos.map(m => ({ titulo: m.nombre_medicamento, fechaStr: m.fecha_inicio, horaStr: m.hora_toma }))
+    ];
 
-    const manana = new Date(fechaActual.getTime() + 24 * 3600 * 1000);
-    const mananaISO = formatearFechaISO(manana);
-    const evsManana = obtenerEventosDeFecha(mananaISO);
-    if (evsManana.length > 0) {
-      return evsManana[0].nombre_evento;
-    }
+    let eventoCercano = null;
+    let menorDiff = Infinity;
 
-    return null;
+    todosLosRegistros.forEach(reg => {
+      if (!reg.fechaStr) return;
+      const [a, m, d] = String(reg.fechaStr).split('T')[0].split('-').map(Number);
+      const [h, min] = String(reg.horaStr || '00:00').substring(0, 5).split(':').map(Number);
+      const fechaReg = new Date(a, m - 1, d, h, min, 0);
+
+      const diffMs = fechaReg.getTime() - ahora.getTime();
+      const diffHoras = diffMs / (1000 * 60 * 60);
+
+      if (diffHoras >= 0 && diffHoras <= 24 && diffHoras < menorDiff) {
+        menorDiff = diffHoras;
+        eventoCercano = reg.titulo;
+      }
+    });
+
+    return eventoCercano;
   };
 
   const renderDiasCalendarioPequeno = () => {
@@ -613,16 +675,10 @@ export default function PantallaCalendario() {
               {fecha.getDate()} de {NOMBRES_MESES[fecha.getMonth()]} de {fecha.getFullYear()}
             </Text>
           </View>
-          {mostrarBotonAgregar && (
+          {mostrarBotonAgregar && !esPasada && (
             <TouchableOpacity
-              style={[estilos.botonAgregarEventoDia, esPasada && { opacity: 0.35 }]}
-              onPress={() => {
-                if (esPasada) {
-                  Alert.alert('Fecha pasada', 'No se pueden programar horarios en fechas anteriores a la actual.');
-                  return;
-                }
-                abrirModalGestion(fechaISO);
-              }}
+              style={estilos.botonAgregarEventoDia}
+              onPress={() => abrirModalGestion(fechaISO)}
             >
               <Feather name="plus-circle" size={18} color="#3B7A8C" />
               <Text style={estilos.textoAgregarEventoDia}>Gestionar Horario</Text>
@@ -738,7 +794,6 @@ export default function PantallaCalendario() {
 
   const registrosDelDiaSeleccionado = registrosDeFecha(`${anioSeleccionado}-${String(mesSeleccionado).padStart(2, '0')}-${String(diaSeleccionado).padStart(2, '0')}`);
   const esDiaSeleccionadoPasado = esFechaPasada(anioSeleccionado, mesSeleccionado, diaSeleccionado);
-  const fechaHoyISO = formatearFechaISO(fechaActual);
   const horariosCuidadoDeHoy = horariosCuidado.filter(
     (turno) => String(turno.fecha_inicio || '').split('T')[0] === fechaHoyISO
   );
@@ -767,13 +822,15 @@ export default function PantallaCalendario() {
               value={busqueda}
               onChangeText={setBusqueda}
             />
-            <TouchableOpacity
-              style={estilos.botonCircularMas}
-              onPress={() => abrirModalGestion(`${anioSeleccionado}-${String(mesSeleccionado).padStart(2, '0')}-${String(diaSeleccionado).padStart(2, '0')}`)}
-              activeOpacity={0.7}
-            >
-              <Feather name="plus" size={24} color="#FFFFFF" />
-            </TouchableOpacity>
+            {!esDiaSeleccionadoPasado && (
+              <TouchableOpacity
+                style={estilos.botonCircularMas}
+                onPress={() => abrirModalGestion(`${anioSeleccionado}-${String(mesSeleccionado).padStart(2, '0')}-${String(diaSeleccionado).padStart(2, '0')}`)}
+                activeOpacity={0.7}
+              >
+                <Feather name="plus" size={24} color="#FFFFFF" />
+              </TouchableOpacity>
+            )}
           </View>
         </View>
 
@@ -804,52 +861,7 @@ export default function PantallaCalendario() {
           onViewableItemsChanged={onViewableItemsChanged}
           viewabilityConfig={viewabilityConfig}
           ListFooterComponent={
-            <View style={{ display: 'none' }}>
-              <View style={estilos.tarjetaDetalleDia}>
-                <View style={estilos.cabeceraDetalleDia}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={estilos.tituloDetalleDia}>
-                      Eventos para el {diaSeleccionado} de {NOMBRES_MESES[mesSeleccionado - 1]} de {anioSeleccionado}
-                    </Text>
-                  </View>
-
-                  <TouchableOpacity
-                    style={[
-                      estilos.botonAgregarEventoDia,
-                      esDiaSeleccionadoPasado && { opacity: 0.35 },
-                    ]}
-                    onPress={() => {
-                      if (esDiaSeleccionadoPasado) {
-                        Alert.alert('Fecha pasada', 'No se pueden programar horarios en fechas anteriores a la actual.');
-                        return;
-                      }
-                      const f = `${anioSeleccionado}-${String(mesSeleccionado).padStart(2, '0')}-${String(diaSeleccionado).padStart(2, '0')}`;
-                      abrirModalGestion(f);
-                    }}
-                  >
-                    <Feather name="plus-circle" size={18} color="#3B7A8C" />
-                    <Text style={estilos.textoAgregarEventoDia}>Gestionar Horario</Text>
-                  </TouchableOpacity>
-                </View>
-
-                {registrosDelDiaSeleccionado.length === 0 ? (
-                  <Text style={estilos.textoSinEventos}>No hay registros para este día.</Text>
-                ) : (
-                  registrosDelDiaSeleccionado.map((registro) => {
-                    return (
-                      <TouchableOpacity key={`${registro.tipo}-${registro.id_evento || registro.id_horario_cuidado || registro.id_medicamento}`} style={estilos.itemEventoDetalle} onPress={() => abrirDetalleRegistro(registro)}>
-                        <View style={[estilos.puntoColorEvento, { backgroundColor: registro.tipo === 'evento' ? '#38b6ff' : registro.tipo === 'turno' ? '#c1ff72' : '#ffde59' }]} />
-                        <View style={estilos.infoEventoDetalle}>
-                          <Text style={estilos.tipoRegistro}>{registro.tipo.toUpperCase()}</Text>
-                          <Text style={estilos.nombreEventoDetalle}>{registro.titulo}</Text>
-                          <Text style={estilos.horaEventoDetalle}>Hora: {String(registro.hora || '').substring(0, 5)}</Text>
-                        </View>
-                      </TouchableOpacity>
-                    );
-                  })
-                )}
-              </View>
-            </View>
+            <View style={{ display: 'none' }} />
           }
         />
 
@@ -897,24 +909,27 @@ export default function PantallaCalendario() {
               </View>
 
               <View style={estilos.selectorTipoGestion}>
-                <TouchableOpacity
-                  style={[estilos.btnSelectorTipo, tipoGestion === 'cuidado' && estilos.btnSelectorActivo]}
-                  onPress={() => setTipoGestion('cuidado')}
-                >
-                  <Text style={[estilos.txtSelectorTipo, tipoGestion === 'cuidado' && estilos.txtSelectorActivo]}>Turno Cuidado</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[estilos.btnSelectorTipo, tipoGestion === 'medicamento' && estilos.btnSelectorActivo]}
-                  onPress={() => setTipoGestion('medicamento')}
-                >
-                  <Text style={[estilos.txtSelectorTipo, tipoGestion === 'medicamento' && estilos.txtSelectorActivo]}>Medicamento</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[estilos.btnSelectorTipo, tipoGestion === 'evento' && estilos.btnSelectorActivo]}
-                  onPress={() => setTipoGestion('evento')}
-                >
-                  <Text style={[estilos.txtSelectorTipo, tipoGestion === 'evento' && estilos.txtSelectorActivo]}>Evento</Text>
-                </TouchableOpacity>
+                {['cuidado', 'medicamento', 'evento'].map((ent) => {
+                  const estaEditando = Boolean(registroEditando);
+                  const deshabilitadoPorEdicion = estaEditando && tipoGestion !== ent;
+
+                  return (
+                    <TouchableOpacity
+                      key={ent}
+                      disabled={deshabilitadoPorEdicion}
+                      style={[
+                        estilos.btnSelectorTipo,
+                        tipoGestion === ent && estilos.btnSelectorActivo,
+                        deshabilitadoPorEdicion && { opacity: 0.3 }
+                      ]}
+                      onPress={() => setTipoGestion(ent)}
+                    >
+                      <Text style={[estilos.txtSelectorTipo, tipoGestion === ent && estilos.txtSelectorActivo]}>
+                        {ent === 'cuidado' ? 'Turno Cuidado' : ent.charAt(0).toUpperCase() + ent.slice(1)}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
               </View>
 
               {errorFormulario ? <Text style={estilos.errorFormulario}>{errorFormulario}</Text> : null}
@@ -939,16 +954,21 @@ export default function PantallaCalendario() {
                   </View>
                   <View style={estilos.grupoInputForm}>
                     <Text style={estilos.labelForm}>Hora Inicio (HH:MM) *</Text>
-                    <TextInput
+                    <FormPickerInput
+                      pickerType="time"
+                      modalTitle="Hora de inicio"
                       style={[estilos.inputForm, estilos.inputHora]}
                       value={horaInicioCuidado}
                       onChangeText={setHoraInicioCuidado}
                       placeholder="08:00"
+                      minTime={!registroEditando && esFechaFormularioHoy ? horaActualStr : null}
                     />
                   </View>
                   <View style={estilos.grupoInputForm}>
                     <Text style={estilos.labelForm}>Hora Fin (HH:MM) *</Text>
-                    <TextInput
+                    <FormPickerInput
+                      pickerType="time"
+                      modalTitle="Hora de fin"
                       style={[estilos.inputForm, estilos.inputHora]}
                       value={horaFinCuidado}
                       onChangeText={setHoraFinCuidado}
@@ -957,15 +977,17 @@ export default function PantallaCalendario() {
                   </View>
                   <View style={estilos.grupoInputForm}>
                     <Text style={estilos.labelForm}>Fecha de Inicio (YYYY-MM-DD) *</Text>
-                    <TextInput
+                    <FormPickerInput
+                      pickerType="date"
+                      modalTitle="Fecha de inicio"
                       style={estilos.inputForm}
                       value={fechaFormulario}
                       onChangeText={setFechaFormulario}
-                      placeholder="2026-09-07"
+                      placeholder="2026-09-20"
+                      minDate={!registroEditando ? fechaHoyISO : null}
                     />
                   </View>
 
-                  {/* Retroalimentación visual dinámica de fecha de inicio a fecha de fin */}
                   {(() => {
                     try {
                       const { fin, diffHoras } = calcularFechasTurno();
@@ -1020,12 +1042,46 @@ export default function PantallaCalendario() {
                     />
                   </View>
                   <View style={estilos.grupoInputForm}>
-                    <Text style={estilos.labelForm}>Hora de Toma (HH:MM) *</Text>
-                    <TextInput
+                    <Text style={estilos.labelForm}>Fecha de Inicio (YYYY-MM-DD) *</Text>
+                    <FormPickerInput
+                      pickerType="date"
+                      modalTitle="Fecha de inicio toma"
                       style={estilos.inputForm}
-                      placeholder="16:00"
+                      value={fechaFormulario}
+                      onChangeText={setFechaFormulario}
+                      placeholder="2026-09-20"
+                    />
+                  </View>
+                  <View style={estilos.grupoInputForm}>
+                    <Text style={estilos.labelForm}>Hora de Primera Toma (HH:MM) *</Text>
+                    <FormPickerInput
+                      pickerType="time"
+                      modalTitle="Hora de toma"
+                      style={estilos.inputForm}
+                      placeholder="08:00"
                       value={horaTomaMed}
                       onChangeText={setHoraTomaMed}
+                      minTime={!registroEditando && esFechaFormularioHoy ? horaActualStr : null}
+                    />
+                  </View>
+                  <View style={estilos.grupoInputForm}>
+                    <Text style={estilos.labelForm}>Intervalo (cada cuántas horas se repite)</Text>
+                    <TextInput
+                      style={estilos.inputForm}
+                      keyboardType="numeric"
+                      placeholder="Ej. 8 (cada 8 horas)"
+                      value={intervaloMed}
+                      onChangeText={setIntervaloMed}
+                    />
+                  </View>
+                  <View style={estilos.grupoInputForm}>
+                    <Text style={estilos.labelForm}>Número de Repeticiones (total de tomas)</Text>
+                    <TextInput
+                      style={estilos.inputForm}
+                      keyboardType="numeric"
+                      placeholder="Ej. 3"
+                      value={repeticionesMed}
+                      onChangeText={setRepeticionesMed}
                     />
                   </View>
                 </>
@@ -1037,16 +1093,27 @@ export default function PantallaCalendario() {
                   </View>
                   <View style={estilos.grupoInputForm}>
                     <Text style={estilos.labelForm}>Fecha (YYYY-MM-DD) *</Text>
-                    <TextInput
+                    <FormPickerInput
+                      pickerType="date"
+                      modalTitle="Fecha del evento"
                       style={estilos.inputForm}
                       value={fechaEvento}
                       onChangeText={setFechaEvento}
-                      placeholder="2026-09-07"
+                      placeholder="2026-09-20"
+                      minDate={!registroEditando ? fechaHoyISO : null}
                     />
                   </View>
                   <View style={estilos.grupoInputForm}>
                     <Text style={estilos.labelForm}>Hora (HH:MM) *</Text>
-                    <TextInput style={[estilos.inputForm, estilos.inputHora]} placeholder="16:00" value={horaEvento} onChangeText={setHoraEvento} keyboardType="numeric" />
+                    <FormPickerInput
+                      pickerType="time"
+                      modalTitle="Hora del evento"
+                      style={[estilos.inputForm, estilos.inputHora]}
+                      placeholder="16:00"
+                      value={horaEvento}
+                      onChangeText={setHoraEvento}
+                      minTime={!registroEditando && fechaEvento === fechaHoyISO ? horaActualStr : null}
+                    />
                   </View>
                   <Text style={estilos.fechaSeleccionada}>Fecha seleccionada: {fechaEvento}</Text>
                 </>

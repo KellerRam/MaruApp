@@ -3,16 +3,17 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import {
-  ActivityIndicator,
-  Modal,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Modal,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from 'react-native';
 import { API_URL } from '../config/api';
+import { apiFetch as fetch } from '../config/apiFetch';
 
 export default function GroupSelectionScreen() {
   const router = useRouter();
@@ -129,10 +130,7 @@ export default function GroupSelectionScreen() {
 
   return (
     <ScrollView style={estilos.contenedor} contentContainerStyle={estilos.scrollContent}>
-      {/* Logo */}
-      <View style={estilos.contenedorLogo}>
-        <Text style={estilos.textoLogo}>LOGO</Text>
-      </View>
+
 
       {!mostrarFormulario ? (
         // Opciones cuando no está enlazado a un grupo
@@ -153,20 +151,15 @@ export default function GroupSelectionScreen() {
             <Text style={estilos.textoBotonPrimario}>Crear grupo</Text>
           </TouchableOpacity>
 
-          {/* Opción 2: Unirse a grupo (sin lógica asignada de momento) */}
           <TouchableOpacity
             style={estilos.botonSecundario}
             onPress={() => {
-              // De momento "unirse a grupo" no tendrá ninguna lógica asignada
+              router.push('/join'); // <--- Redirección hacia la pantalla de unión
             }}
             activeOpacity={0.7}
           >
             <Text style={estilos.textoBotonSecundario}>Unirse a grupo</Text>
           </TouchableOpacity>
-
-          <Text style={estilos.notaSinLogica}>
-            * La opción "Unirse a grupo" estará disponible próximamente.
-          </Text>
         </View>
       ) : (
         // Formulario para creación de grupo

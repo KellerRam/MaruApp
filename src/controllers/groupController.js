@@ -1,17 +1,19 @@
 // src/controllers/groupController.js
 const pool = require('../config/db');
 const jwt = require('jsonwebtoken');
+const bcrypt = require('bcrypt');
+const crypto = require('crypto');
 
 const crearGrupo = async (req, res) => {
+  const { nombreGrupo, idUsuario } = req.body;
+
+  if (!nombreGrupo || !idUsuario) {
+    return res.status(400).json({ error: 'El nombre del grupo y el usuario son obligatorios' });
+  }
+
   const client = await pool.connect();
 
   try {
-    const { nombreGrupo, idUsuario } = req.body;
-
-    if (!nombreGrupo || !idUsuario) {
-      return res.status(400).json({ error: 'El nombre del grupo y el usuario son obligatorios' });
-    }
-
     await client.query('BEGIN');
 
     const usuarioRes = await client.query(
@@ -90,7 +92,8 @@ const obtenerGrupoUsuario = async (req, res) => {
 const obtenerMiembrosGrupo = async (req, res) => {
   try {
     const resultado = await pool.query(
-      `SELECT u.id_usuario,
+      `SELECT DISTINCT ON (u.id_usuario) 
+              u.id_usuario,
               u.nombre_usuario AS nombre,
               CASE WHEN p.id_usuario IS NOT NULL THEN 'paciente'
                    WHEN c.id_usuario IS NOT NULL THEN 'cuidador'
@@ -100,13 +103,92 @@ const obtenerMiembrosGrupo = async (req, res) => {
        LEFT JOIN paciente p ON p.id_usuario = u.id_usuario
        LEFT JOIN cuidador c ON c.id_usuario = u.id_usuario
        WHERE gu.id_grupo = $1
-       ORDER BY u.nombre_usuario ASC`,
+       ORDER BY u.id_usuario, u.nombre_usuario ASC`,
       [req.params.idGrupo]
     );
 
     res.status(200).json({ miembros: resultado.rows });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  }
+};
+
+const crearPacienteManual = async (req, res) => {
+  const { idGrupo } = req.params;
+  const { idUsuario, nombre, genero, fechaNacimiento } = req.body || {};
+  const nombreLimpio = typeof nombre === 'string' ? nombre.trim() : '';
+  const fechaValida = typeof fechaNacimiento === 'string'
+    && /^\d{4}-\d{2}-\d{2}$/.test(fechaNacimiento)
+    && !Number.isNaN(Date.parse(`${fechaNacimiento}T00:00:00.000Z`))
+    && new Date(`${fechaNacimiento}T00:00:00.000Z`).toISOString().slice(0, 10) === fechaNacimiento
+    && fechaNacimiento <= new Date().toISOString().slice(0, 10);
+
+  if (!/^\d+$/.test(idGrupo) || !Number.isInteger(Number(idUsuario)) || !nombreLimpio || nombreLimpio.length > 100
+    || !['Masculino', 'Femenino', 'Otro'].includes(genero) || !fechaValida) {
+    return res.status(400).json({ error: 'Nombre, género y fecha de nacimiento válidos son obligatorios' });
+  }
+
+  let client;
+  try {
+    client = await pool.connect();
+    await client.query('BEGIN');
+
+    const grupo = await client.query('SELECT id_grupo FROM grupo WHERE id_grupo = $1 FOR UPDATE', [idGrupo]);
+    if (grupo.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'El grupo no existe' });
+    }
+
+    const creador = await client.query(
+      'SELECT rol FROM grupo_usuario WHERE id_grupo = $1 AND id_usuario = $2 FOR UPDATE',
+      [idGrupo, idUsuario]
+    );
+    if (creador.rows.length === 0 || creador.rows[0].rol === 'paciente') {
+      await client.query('ROLLBACK');
+      return res.status(403).json({ error: 'Solo un cuidador del grupo puede agregar un paciente' });
+    }
+
+    const pacienteExistente = await client.query(
+      `SELECT id_usuario FROM grupo_usuario
+       WHERE id_grupo = $1 AND rol = 'paciente'
+       LIMIT 1`,
+      [idGrupo]
+    );
+    if (pacienteExistente.rows.length > 0) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: 'Este grupo ya tiene un paciente' });
+    }
+
+    const passwordAleatoria = crypto.randomBytes(32).toString('hex');
+    const passwordHash = await bcrypt.hash(passwordAleatoria, 10);
+    const usuario = await client.query(
+      `INSERT INTO usuario (nombre_usuario, password_usuario, fecha_nacimiento_usuario, genero, correo)
+       VALUES ($1, $2, $3, $4, NULL)
+       RETURNING id_usuario`,
+      [nombreLimpio, passwordHash, fechaNacimiento, genero]
+    );
+    const idPaciente = usuario.rows[0].id_usuario;
+
+    await client.query('INSERT INTO paciente (id_usuario) VALUES ($1)', [idPaciente]);
+    await client.query(
+      "INSERT INTO grupo_usuario (id_usuario, id_grupo, rol) VALUES ($1, $2, 'paciente')",
+      [idPaciente, idGrupo]
+    );
+
+    await client.query('COMMIT');
+    return res.status(201).json({
+      mensaje: 'Paciente agregado al grupo',
+      miembro: { id_usuario: idPaciente, nombre: nombreLimpio, rol: 'paciente' }
+    });
+  } catch (error) {
+    if (client) await client.query('ROLLBACK').catch(() => {});
+    if (error.code === '23505') {
+      return res.status(409).json({ error: 'Este grupo ya tiene un paciente' });
+    }
+    console.error('Error al agregar paciente manual:', error);
+    return res.status(500).json({ error: 'No se pudo agregar el paciente' });
+  } finally {
+    client?.release();
   }
 };
 
@@ -166,6 +248,12 @@ const unirseAGrupo = async (req, res) => {
       'INSERT INTO grupo_usuario (id_usuario, id_grupo) VALUES ($1, $2)',
       [idUsuario, invitacion.idGrupo]
     );
+
+    await pool.query(
+      'INSERT INTO cuidador (id_usuario) VALUES ($1) ON CONFLICT (id_usuario) DO NOTHING',
+      [idUsuario]
+    );
+
     res.status(201).json({ mensaje: 'Te has unido al grupo', idGrupo: invitacion.idGrupo });
   } catch (error) {
     if (error.name === 'TokenExpiredError' || error.name === 'JsonWebTokenError') {
@@ -237,17 +325,35 @@ const actualizarRolMiembro = async (req, res) => {
 };
 
 const eliminarMiembroGrupo = async (req, res) => {
+  const client = await pool.connect();
   try {
-    const resultado = await pool.query(
-      'DELETE FROM grupo_usuario WHERE id_grupo = $1 AND id_usuario = $2 RETURNING id_usuario',
-      [req.params.idGrupo, req.params.idUsuario]
+    const { idGrupo, idUsuario } = req.params;
+
+    await client.query('BEGIN');
+
+    const miembroRes = await client.query(
+      'SELECT id_usuario FROM grupo_usuario WHERE id_grupo = $1 AND id_usuario = $2 FOR UPDATE',
+      [idGrupo, idUsuario]
     );
-    if (resultado.rows.length === 0) {
+    if (miembroRes.rows.length === 0) {
+      await client.query('ROLLBACK');
       return res.status(404).json({ error: 'El usuario no pertenece a este grupo' });
     }
+
+    // Al salir del grupo, la clase del usuario vuelve a "cuidador" por defecto
+    await client.query('DELETE FROM horario_cuidado WHERE id_cuidador = $1', [idUsuario]);
+    await client.query('DELETE FROM paciente WHERE id_usuario = $1', [idUsuario]);
+    await client.query('INSERT INTO cuidador (id_usuario) VALUES ($1) ON CONFLICT (id_usuario) DO NOTHING', [idUsuario]);
+
+    await client.query('DELETE FROM grupo_usuario WHERE id_grupo = $1 AND id_usuario = $2', [idGrupo, idUsuario]);
+
+    await client.query('COMMIT');
     res.status(200).json({ mensaje: 'Miembro eliminado del grupo' });
   } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
     res.status(500).json({ error: error.message });
+  } finally {
+    client.release();
   }
 };
 
@@ -255,6 +361,7 @@ module.exports = {
   crearGrupo,
   obtenerGrupoUsuario,
   obtenerMiembrosGrupo,
+  crearPacienteManual,
   crearInvitacionGrupo,
   unirseAGrupo,
   actualizarRolMiembro,

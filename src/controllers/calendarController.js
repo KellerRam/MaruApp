@@ -1,8 +1,16 @@
 // src/controllers/calendarController.js
 const pool = require('../config/db');
 
+const fechaISOValida = (fecha) => typeof fecha === 'string'
+  && /^\d{4}-\d{2}-\d{2}$/.test(fecha)
+  && !Number.isNaN(Date.parse(`${fecha}T00:00:00.000Z`))
+  && new Date(`${fecha}T00:00:00.000Z`).toISOString().slice(0, 10) === fecha;
+
+const hora24Valida = (hora) => typeof hora === 'string' && /^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/.test(hora);
+
 // Obtener o crear el calendario del grupo y listar sus eventos
 const obtenerCalendarioYEventos = async (req, res) => {
+  let client;
   try {
     const { idGrupo } = req.params;
 
@@ -10,9 +18,16 @@ const obtenerCalendarioYEventos = async (req, res) => {
       return res.status(400).json({ error: 'El ID de grupo es obligatorio' });
     }
 
-    // 1. Buscar si ya existe un calendario para este grupo
-    let calRes = await pool.query(
-      'SELECT id_calendario, fecha, id_grupo FROM calendario WHERE id_grupo = $1',
+    client = await pool.connect();
+    await client.query('BEGIN');
+    const grupoRes = await client.query('SELECT id_grupo FROM grupo WHERE id_grupo = $1 FOR UPDATE', [idGrupo]);
+    if (grupoRes.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Grupo no encontrado' });
+    }
+
+    const calRes = await client.query(
+      'SELECT id_calendario, fecha, id_grupo FROM calendario WHERE id_grupo = $1 ORDER BY id_calendario LIMIT 1 FOR UPDATE',
       [idGrupo]
     );
 
@@ -20,7 +35,7 @@ const obtenerCalendarioYEventos = async (req, res) => {
 
     if (calRes.rows.length === 0) {
       // Si no existe, crear el calendario único para el grupo
-      const nuevoCal = await pool.query(
+      const nuevoCal = await client.query(
         'INSERT INTO calendario (fecha, id_grupo) VALUES (CURRENT_DATE, $1) RETURNING id_calendario, fecha, id_grupo',
         [idGrupo]
       );
@@ -30,7 +45,7 @@ const obtenerCalendarioYEventos = async (req, res) => {
     }
 
     // 2. Obtener todos los eventos asociados a este calendario
-    const eventosRes = await pool.query(
+    const eventosRes = await client.query(
       `SELECT 
         id_evento, 
         nombre_evento, 
@@ -43,14 +58,19 @@ const obtenerCalendarioYEventos = async (req, res) => {
       [idCalendario]
     );
 
-    res.status(200).json({
+    await client.query('COMMIT');
+
+    return res.status(200).json({
       id_calendario: idCalendario,
       id_grupo: parseInt(idGrupo, 10),
       eventos: eventosRes.rows
     });
   } catch (error) {
+    if (client) await client.query('ROLLBACK').catch(() => {});
     console.error('Error en obtenerCalendarioYEventos:', error);
-    res.status(500).json({ error: error.message });
+    return res.status(500).json({ error: error.message });
+  } finally {
+    client?.release();
   }
 };
 
@@ -58,18 +78,15 @@ const obtenerCalendarioYEventos = async (req, res) => {
 const crearEvento = async (req, res) => {
   try {
     const { nombre_evento, fecha_evento, hora_evento, id_calendario } = req.body;
+    const nombre = typeof nombre_evento === 'string' ? nombre_evento.trim() : '';
 
-    if (!nombre_evento || !fecha_evento || !hora_evento || !id_calendario) {
+    if (!nombre || !fechaISOValida(fecha_evento) || !hora24Valida(hora_evento)
+      || !Number.isInteger(Number(id_calendario)) || Number(id_calendario) <= 0) {
       return res.status(400).json({
-        error: 'Todos los campos son obligatorios: nombre_evento, fecha_evento, hora_evento, id_calendario'
+        error: 'Nombre, fecha válida, hora e id_calendario son obligatorios'
       });
     }
 
-    if (!/^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/.test(hora_evento.trim())) {
-      return res.status(400).json({ error: 'La hora debe estar en formato de 24 horas HH:MM' });
-    }
-
-    // Formatear hora si viene como HH:MM
     let horaFinal = hora_evento.trim();
     if (horaFinal.length === 5) {
       horaFinal += ':00';
@@ -79,7 +96,7 @@ const crearEvento = async (req, res) => {
       `INSERT INTO evento (nombre_evento, fecha_evento, hora_evento, id_calendario)
        VALUES ($1, $2, $3, $4)
        RETURNING id_evento, nombre_evento, hora_evento, TO_CHAR(fecha_evento, 'YYYY-MM-DD') AS fecha_evento, id_calendario`,
-      [nombre_evento.trim(), fecha_evento.trim(), horaFinal, parseInt(id_calendario, 10)]
+      [nombre, fecha_evento, horaFinal, Number(id_calendario)]
     );
 
     res.status(201).json({
@@ -95,14 +112,15 @@ const crearEvento = async (req, res) => {
 const actualizarEvento = async (req, res) => {
   try {
     const { nombre_evento, fecha_evento, hora_evento } = req.body;
-    if (!nombre_evento?.trim() || !/^\d{4}-\d{2}-\d{2}$/.test(fecha_evento || '') || !/^([01]\d|2[0-3]):[0-5]\d$/.test(hora_evento || '')) {
+    const nombre = typeof nombre_evento === 'string' ? nombre_evento.trim() : '';
+    if (!nombre || !fechaISOValida(fecha_evento) || !hora24Valida(hora_evento)) {
       return res.status(400).json({ error: 'Nombre, fecha válida y hora HH:MM son obligatorios' });
     }
     const resultado = await pool.query(
       `UPDATE evento SET nombre_evento = $1, fecha_evento = $2, hora_evento = $3
        WHERE id_evento = $4
        RETURNING id_evento, nombre_evento, hora_evento, TO_CHAR(fecha_evento, 'YYYY-MM-DD') AS fecha_evento, id_calendario`,
-      [nombre_evento.trim(), fecha_evento, `${hora_evento}:00`, req.params.id]
+      [nombre, fecha_evento, hora_evento.length === 5 ? `${hora_evento}:00` : hora_evento, req.params.id]
     );
     if (resultado.rows.length === 0) return res.status(404).json({ error: 'Evento no encontrado' });
     res.status(200).json({ evento: resultado.rows[0] });

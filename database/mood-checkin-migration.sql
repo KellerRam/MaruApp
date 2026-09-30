@@ -1,0 +1,2 @@
+ALTER TABLE chat_mensaje
+  ADD COLUMN IF NOT EXISTS solo_cuidadores BOOLEAN NOT NULL DEFAULT false;

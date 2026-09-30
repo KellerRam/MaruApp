@@ -1,17 +1,42 @@
 import { Feather } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import Constants from 'expo-constants';
+import * as Notifications from 'expo-notifications';
 import { useRouter } from 'expo-router';
-import { useState } from 'react';
+import { Accelerometer } from 'expo-sensors';
+import { useEffect, useRef, useState } from 'react';
 import {
-  ScrollView,
-  StyleSheet,
-  Switch,
-  Text,
-  TouchableOpacity,
-  View
+    Alert,
+    Platform,
+    ScrollView,
+    StyleSheet,
+    Switch,
+    Text,
+    TouchableOpacity,
+    View
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { API_URL } from '../config/api';
+import { apiFetch as fetch } from '../config/apiFetch';
+
+// Umbral de fuerza (en g, restando la gravedad) para considerar una sacudida "muy brusca"
+const UMBRAL_SACUDIDA = 2.6;
+const LECTURAS_CONSECUTIVAS_REQUERIDAS = 3;
+const VENTANA_LECTURAS_MS = 900;
+const ENFRIAMIENTO_MS = 15000;
+
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowBanner: true,
+    shouldShowList: true,
+    shouldPlaySound: true,
+    shouldSetBadge: true,
+  }),
+});
 
 export default function NotificationSettingsScreen() {
   const router = useRouter();
+  const montadaRef = useRef(false);
   
   const [alertaBienestar, setAlertaBienestar] = useState(false);
   const [expandidoBienestar, setExpandidoBienestar] = useState(false);
@@ -20,10 +45,6 @@ export default function NotificationSettingsScreen() {
   const [recordatoriosMeds, setRecordatoriosMeds] = useState(false);
   const [expandidoMeds, setExpandidoMeds] = useState(false);
 
-  const [tonoNotif, setTonoNotif] = useState(false);
-  const [expandidoTono, setExpandidoTono] = useState(false);
-
-  const [permisosNotif, setPermisosNotif] = useState(true);
   const [expandidoPermisos, setExpandidoPermisos] = useState(false);
 
   const [eventosProximos, setEventosProximos] = useState(false);
@@ -32,15 +53,239 @@ export default function NotificationSettingsScreen() {
   const [emergencia, setEmergencia] = useState(true);
   const [expandidoEmergencia, setExpandidoEmergencia] = useState(false);
 
-  const cambiarFrecuencia = (incremento) => {
+  useEffect(() => {
+    montadaRef.current = true;
+    return () => { montadaRef.current = false; };
+  }, []);
+
+  // Cargar estado inicial desde el backend
+  useEffect(() => {
+    const cargarConfiguracion = async () => {
+      try {
+        const idUsuario = await AsyncStorage.getItem('userId');
+        if (!idUsuario || !montadaRef.current) return;
+
+        const respuesta = await fetch(`${API_URL}/api/notifications/preferences/${idUsuario}`);
+        if (!montadaRef.current) return;
+        if (respuesta.ok) {
+          const datos = await respuesta.json();
+          if (!montadaRef.current) return;
+          setAlertaBienestar(datos.confirmacion_bienestar || false);
+          setFrecuenciaBienestar(datos.frecuencia || 1);
+        }
+      } catch (error) {
+        if (montadaRef.current) console.error('Error al cargar preferencias:', error);
+      }
+    };
+    cargarConfiguracion();
+  }, []);
+
+  // Marca la alerta como "leída" cuando el paciente toca la notificación (detiene reintentos/escalada)
+  useEffect(() => {
+    const confirmarDesdeNotificacion = async (data) => {
+      if (!data?.tipo || !data?.clave_ocurrencia) return;
+      try {
+        const idUsuario = await AsyncStorage.getItem('userId');
+        if (!idUsuario) return;
+        const respuesta = await fetch(`${API_URL}/api/notifications/confirmar`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tipo: data.tipo, id_usuario: idUsuario, clave_ocurrencia: data.clave_ocurrencia }),
+        });
+        if (!respuesta.ok) throw new Error('No se pudo confirmar la alerta');
+      } catch (error) {
+        console.error('Error al confirmar alerta:', error);
+      }
+    };
+
+    const suscripcion = Notifications.addNotificationResponseReceivedListener((respuesta) => {
+      confirmarDesdeNotificacion(respuesta.notification.request.content.data);
+    });
+    return () => suscripcion.remove();
+  }, []);
+
+  // Detección de sacudida muy brusca mediante el acelerómetro (requiere varias lecturas
+  // consecutivas por encima del umbral para evitar falsos positivos con movimientos normales).
+  // Nota: en apps administradas por Expo (Expo Go o incluso development build) la detección solo
+  // funciona mientras el proceso de JS siga vivo (primer plano o segundo plano reciente); una vez
+  // el sistema operativo mata la app o el dispositivo está bloqueado por mucho tiempo, se requeriría
+  // un módulo nativo con servicio en segundo plano (fuera del alcance de Expo managed).
+  useEffect(() => {
+    let subscription = null;
+
+    if (emergencia) {
+      let ultimaActualizacion = 0;
+      let lecturasRecientes = [];
+      let ultimoDisparo = 0;
+
+      Accelerometer.setUpdateInterval(100);
+      subscription = Accelerometer.addListener(({ x, y, z }) => {
+        const ahora = Date.now();
+        if (ahora - ultimaActualizacion < 90) return;
+        ultimaActualizacion = ahora;
+
+        const magnitud = Math.sqrt(x * x + y * y + z * z);
+        const fuerzaNeta = Math.abs(magnitud - 1); // resta la gravedad (~1g en reposo)
+
+        lecturasRecientes = lecturasRecientes.filter((t) => ahora - t < VENTANA_LECTURAS_MS);
+        if (fuerzaNeta > UMBRAL_SACUDIDA) {
+          lecturasRecientes.push(ahora);
+        }
+
+        if (lecturasRecientes.length >= LECTURAS_CONSECUTIVAS_REQUERIDAS && ahora - ultimoDisparo > ENFRIAMIENTO_MS) {
+          ultimoDisparo = ahora;
+          lecturasRecientes = [];
+          dispararEmergenciaPorAgitacion();
+        }
+      });
+    }
+
+    return () => {
+      if (subscription) {
+        subscription.remove();
+      }
+    };
+  }, [emergencia]);
+
+  const dispararEmergenciaPorAgitacion = async () => {
+    try {
+      const idGrupo = await AsyncStorage.getItem('groupId');
+      const idUsuario = await AsyncStorage.getItem('userId');
+      if (!idGrupo || !idUsuario) return;
+
+      // Envía alerta al chat o endpoint de emergencia del backend igual que el botón principal
+      const respuesta = await fetch(`${API_URL}/api/emergency/trigger`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id_grupo: idGrupo, id_usuario: idUsuario, motivo: 'Agitación brusca detectada por sensor' }),
+      });
+      if (!respuesta.ok) throw new Error('El servidor no pudo registrar la emergencia');
+      if (!montadaRef.current) return;
+
+      Alert.alert('¡Alerta de Emergencia!', 'Se ha detectado un movimiento brusco. Se ha notificado al grupo y cuidadores.');
+    } catch (error) {
+      console.error('Error al disparar emergencia automática:', error);
+    }
+  };
+
+  const guardarPreferenciasBienestar = async (valor, frecuencia) => {
+    try {
+      const idUsuario = await AsyncStorage.getItem('userId');
+      if (!idUsuario) return false;
+
+      const respuesta = await fetch(`${API_URL}/api/notifications/bienestar/${idUsuario}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirmacion_bienestar: valor, frecuencia }),
+      });
+      if (!respuesta.ok) throw new Error('No se pudieron guardar las preferencias de bienestar');
+      return true;
+    } catch (error) {
+      console.error('Error al actualizar confirmacion_bienestar:', error);
+      return false;
+    }
+  };
+
+  const guardarConfirmacionBienestar = async (valor) => {
+    const guardado = await guardarPreferenciasBienestar(valor, frecuenciaBienestar);
+    if (!guardado) {
+      Alert.alert('Error', 'No se pudo guardar la preferencia de bienestar.');
+      return;
+    }
+    setAlertaBienestar(valor);
+    if (!valor) setExpandidoBienestar(false);
+  };
+
+const registrarTokenPush = async () => {
+    try {
+      const idUsuario = await AsyncStorage.getItem('userId');
+      if (!idUsuario) return;
+
+      const projectId = Constants?.expoConfig?.extra?.eas?.projectId ?? Constants?.easConfig?.projectId;
+      if (!projectId) {
+        console.warn('No hay projectId de EAS configurado: no se puede obtener el token de push de Expo.');
+        return;
+      }
+
+      const token = (await Notifications.getExpoPushTokenAsync({ projectId })).data;
+      const respuesta = await fetch(`${API_URL}/api/notifications/push-token/${idUsuario}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ push_token: token }),
+      });
+      if (!respuesta.ok) throw new Error('El servidor rechazó el token push');
+    } catch (error) {
+      console.warn('No se pudo registrar el token push:', error.message);
+    }
+  };
+
+const solicitarPermisosNotificacion = async () => {
+    try {
+      const { status: existingStatus } = await Notifications.getPermissionsAsync();
+      let finalStatus = existingStatus;
+
+      if (existingStatus !== 'granted') {
+        const { status } = await Notifications.requestPermissionsAsync({
+          ios: {
+            allowAlert: true,
+            allowBadge: true,
+            allowSound: true,
+            allowAnnouncements: true,
+            allowCriticalAlerts: true,
+            allowDisplayInCarPlay: true,
+            allowProvisional: false,
+          },
+          android: {},
+        });
+        finalStatus = status;
+      }
+
+      if (finalStatus !== 'granted') {
+        Alert.alert(
+          'Permisos necesarios',
+          'Para recibir alertas de bienestar, medicamentos y emergencias, debes habilitar las notificaciones (incluyendo alertas urgentes) en la configuración de tu dispositivo.'
+        );
+        return;
+      }
+
+      if (Platform.OS === 'android') {
+        await Notifications.setNotificationChannelAsync('emergencias-canal', {
+          name: 'Alertas de Emergencia y Bienestar',
+          importance: Notifications.AndroidImportance.MAX,
+          vibrationPattern: [0, 250, 250, 250],
+          lightColor: '#FF231F7C',
+          sound: 'default',
+        });
+      }
+
+      await registrarTokenPush();
+
+      Alert.alert(
+        '¡Éxito!',
+        'Los permisos de notificaciones (alertas, urgentes y sonido) han sido concedidos. Nota: para que las alertas lleguen con la app cerrada o el dispositivo bloqueado, la app debe instalarse como development/production build (no funciona con notificaciones push en Expo Go para Android).'
+      );
+      setExpandidoPermisos(false);
+    } catch (error) {
+      Alert.alert('Error', 'Ocurrió un error al solicitar los permisos de notificación.');
+      console.error(error);
+    }
+  };
+
+  const cambiarFrecuencia = async (incremento) => {
     const nuevaFrecuencia = frecuenciaBienestar + incremento;
     if (nuevaFrecuencia >= 1 && nuevaFrecuencia <= 5) {
+      const guardado = await guardarPreferenciasBienestar(alertaBienestar, nuevaFrecuencia);
+      if (!guardado) {
+        Alert.alert('Error', 'No se pudo guardar la frecuencia de bienestar.');
+        return;
+      }
       setFrecuenciaBienestar(nuevaFrecuencia);
     }
   };
 
   return (
-    <ScrollView style={estilos.contenedor} contentContainerStyle={estilos.scrollContent}>
+    <SafeAreaView style={estilos.contenedor} edges={['top']}>
+      <ScrollView style={estilos.contenedor} contentContainerStyle={estilos.scrollContent}>
       
       <View style={estilos.encabezado}> 
         <TouchableOpacity style={estilos.botonCerrar} onPress={() => router.push('/(tabs)')}>
@@ -48,6 +293,7 @@ export default function NotificationSettingsScreen() {
         </TouchableOpacity>
       </View>
 
+      {/* ALERTA DE BIENESTAR */}
       <View style={estilos.tarjetaSeccion}>
         <View style={estilos.filaPrincipal}>
           <Text style={estilos.textoTitulo}>ALERTA DE BIENESTAR</Text>
@@ -56,10 +302,7 @@ export default function NotificationSettingsScreen() {
               trackColor={{ false: '#767577', true: '#0A3D4C' }}
               thumbColor={'#f4f3f4'}
               value={alertaBienestar}
-              onValueChange={(val) => {
-                setAlertaBienestar(val);
-                if (!val) setExpandidoBienestar(false);
-              }}
+              onValueChange={guardarConfirmacionBienestar}
             />
             <TouchableOpacity 
               disabled={!alertaBienestar}
@@ -77,7 +320,7 @@ export default function NotificationSettingsScreen() {
 
         {expandidoBienestar && alertaBienestar && (
           <View style={estilos.subOpciones}>
-            <Text style={estilos.subTextoLabel}>Frecuencia al día (Máx. 5):</Text>
+            <Text style={estilos.subTextoLabel}>Frecuencia al día (Máx. 5 - Intervalos de 4 hrs):</Text>
             <View style={estilos.filaFrecuencia}>
               <TouchableOpacity style={estilos.btnContador} onPress={() => cambiarFrecuencia(-1)}>
                 <Text style={estilos.txtContador}>-</Text>
@@ -103,6 +346,7 @@ export default function NotificationSettingsScreen() {
         )}
       </View>
 
+      {/* RECORDATORIOS DE MEDICAMENTOS */}
       <View style={estilos.tarjetaSeccion}>
         <View style={estilos.filaPrincipal}>
           <Text style={estilos.textoTitulo}>RECORDATORIOS DE MEDICAMENTOS</Text>
@@ -134,25 +378,7 @@ export default function NotificationSettingsScreen() {
         )}
       </View>
 
-      <View style={estilos.tarjetaSeccion}>
-        <View style={estilos.filaPrincipal}>
-          <Text style={estilos.textoTitulo}>TONO DE NOTIFICACIONES</Text>
-          <TouchableOpacity 
-            onPress={() => setExpandidoTono(!expandidoTono)}
-            style={estilos.botonFlecha}
-          >
-            <Feather name={expandidoTono ? "chevron-up" : "chevron-down"} size={22} color="#111" />
-          </TouchableOpacity>
-        </View>
-
-        {expandidoTono && (
-          <View style={estilos.subOpciones}>
-            <Text style={estilos.subTextoLabel}>• Sonido actual: Campana Suave</Text>
-            <Text style={estilos.subTextoLabel}>• Vibración: Activada</Text>
-          </View>
-        )}
-      </View>
-
+      {/* PERMISOS DE NOTIFICACIONES */}
       <View style={estilos.tarjetaSeccion}>
         <View style={estilos.filaPrincipal}>
           <Text style={estilos.textoTitulo}>PERMISOS DE NOTIFICACIONES</Text>
@@ -166,13 +392,14 @@ export default function NotificationSettingsScreen() {
 
         {expandidoPermisos && (
           <View style={estilos.subOpciones}>
-            <TouchableOpacity style={estilos.botonPermiso} onPress={() => alert('Permisos de notificaciones push concedidos')}>
+            <TouchableOpacity style={estilos.botonPermiso} onPress={solicitarPermisosNotificacion}>
               <Text style={estilos.textoBotonPermiso}>Otorgar Permisos</Text>
             </TouchableOpacity>
           </View>
         )}
       </View>
 
+      {/* RECORDATORIOS DE EVENTOS PRÓXIMOS */}
       <View style={estilos.tarjetaSeccion}>
         <View style={estilos.filaPrincipal}>
           <Text style={estilos.textoTitulo}>RECORDATORIOS DE EVENTOS PRÓXIMOS</Text>
@@ -204,6 +431,7 @@ export default function NotificationSettingsScreen() {
         )}
       </View>
 
+      {/* NOTIFICACIONES DE EMERGENCIA */}
       <View style={estilos.tarjetaSeccion}>
         <View style={estilos.filaPrincipal}>
           <Text style={estilos.textoTitulo}>NOTIFICACIONES DE EMERGENCIA</Text>
@@ -230,12 +458,13 @@ export default function NotificationSettingsScreen() {
         {expandidoEmergencia && emergencia && (
           <View style={estilos.subOpciones}>
             <Text style={estilos.subTextoLabel}>• Alerta prioritaria para cuidadores</Text>
-            <Text style={estilos.subTextoLabel}>• Sonido de sirena alta permanente</Text>
+            <Text style={estilos.subTextoLabel}>• Sensor de movimiento por giroscopio activado</Text>
           </View>
         )}
       </View>
 
-    </ScrollView>
+      </ScrollView>
+    </SafeAreaView>
   );
 }
 

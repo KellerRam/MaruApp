@@ -4,6 +4,7 @@ const {
   crearHorarioMedicamento,
   crearHorarioCuidado,
   actualizarHorarioMedicamento,
+  actualizarHorarioCuidado,
   eliminarHorarioMedicamento,
   eliminarHorarioCuidado,
 } = require('../src/controllers/scheduleController');
@@ -25,7 +26,7 @@ const crearCliente = () => ({
 
 describe('controlador de horarios', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    jest.resetAllMocks();
   });
 
   describe('obtenerHorariosYEventos', () => {
@@ -115,7 +116,7 @@ describe('controlador de horarios', () => {
       expect(cliente.release).toHaveBeenCalled();
       expect(respuesta.status).toHaveBeenCalledWith(201);
       expect(respuesta.json).toHaveBeenCalledWith({
-        mensaje: 'Toma creada exitosamente',
+        mensaje: 'Tomas creadas exitosamente',
         toma: {
           ...toma,
           nombre_medicamento: 'Paracetamol',
@@ -157,7 +158,13 @@ describe('controlador de horarios', () => {
   describe('crearHorarioCuidado', () => {
     it('rechaza un cuidador que no pertenece al grupo', async () => {
       const respuesta = crearRespuesta();
-      pool.query.mockResolvedValueOnce({ rows: [] });
+      const client = crearCliente();
+      pool.connect.mockResolvedValueOnce(client);
+      client.query
+        .mockResolvedValueOnce()
+        .mockResolvedValueOnce({ rows: [{ id_grupo: 8 }] })
+        .mockResolvedValueOnce({ rows: [] })
+        .mockResolvedValueOnce();
 
       await crearHorarioCuidado({
         body: {
@@ -174,15 +181,23 @@ describe('controlador de horarios', () => {
       expect(respuesta.json).toHaveBeenCalledWith({
         error: 'El cuidador seleccionado no existe en este grupo',
       });
-      expect(pool.query).toHaveBeenCalledTimes(1);
+      expect(client.query).toHaveBeenCalledWith('ROLLBACK');
+      expect(client.release).toHaveBeenCalled();
     });
 
     it('crea un turno con horas normalizadas', async () => {
       const respuesta = crearRespuesta();
+      const client = crearCliente();
       const horario = { id_horario_cuidado: 5, encargado: 'Ana' };
-      pool.query
+      pool.connect.mockResolvedValueOnce(client);
+      client.query
+        .mockResolvedValueOnce()
+        .mockResolvedValueOnce({ rows: [{ id_grupo: 8 }] })
         .mockResolvedValueOnce({ rows: [{ nombre_usuario: 'Ana' }] })
-        .mockResolvedValueOnce({ rows: [horario] });
+        .mockResolvedValueOnce({ rows: [] })
+        .mockResolvedValueOnce()
+        .mockResolvedValueOnce({ rows: [horario] })
+        .mockResolvedValueOnce();
 
       await crearHorarioCuidado({
         body: {
@@ -195,11 +210,13 @@ describe('controlador de horarios', () => {
         },
       }, respuesta);
 
-      expect(pool.query).toHaveBeenNthCalledWith(
-        2,
+      expect(client.query).toHaveBeenNthCalledWith(
+        6,
         expect.stringContaining('INSERT INTO horario_cuidado'),
         [4, 'Ana', '08:00:00', '16:00:00', '2026-09-07', '2026-09-07']
       );
+      expect(client.query).toHaveBeenLastCalledWith('COMMIT');
+      expect(client.release).toHaveBeenCalled();
       expect(respuesta.status).toHaveBeenCalledWith(201);
       expect(respuesta.json).toHaveBeenCalledWith({
         mensaje: 'Turno creado exitosamente',
@@ -210,12 +227,47 @@ describe('controlador de horarios', () => {
         },
       });
     });
+
+    it('rechaza un turno que se traslapa con otro del grupo', async () => {
+      const respuesta = crearRespuesta();
+      const client = crearCliente();
+      pool.connect.mockResolvedValueOnce(client);
+      client.query
+        .mockResolvedValueOnce()
+        .mockResolvedValueOnce({ rows: [{ id_grupo: 8 }] })
+        .mockResolvedValueOnce({ rows: [{ nombre_usuario: 'Ana' }] })
+        .mockResolvedValueOnce({ rows: [{ id_horario_cuidado: 9, encargado: 'Luis' }] })
+        .mockResolvedValueOnce();
+
+      await crearHorarioCuidado({
+        body: {
+          id_grupo: 8,
+          id_cuidador: 4,
+          fecha_inicio: '2026-09-07',
+          fecha_fin: '2026-09-07',
+          hora_inicio: '08:00',
+          hora_fin: '16:00',
+        },
+      }, respuesta);
+
+      expect(respuesta.status).toHaveBeenCalledWith(409);
+      expect(respuesta.json).toHaveBeenCalledWith({
+        error: 'Ya existe un turno de Luis que se traslapa con ese horario en el grupo',
+      });
+      expect(client.query).toHaveBeenCalledWith('ROLLBACK');
+      expect(client.release).toHaveBeenCalled();
+    });
   });
 
   it('actualiza un medicamento existente', async () => {
     const respuesta = crearRespuesta();
-    pool.query
-      .mockResolvedValueOnce({ rows: [{ id_horario_medicamento: 3 }] })
+    const client = crearCliente();
+    pool.connect.mockResolvedValueOnce(client);
+    client.query
+      .mockResolvedValueOnce()
+      .mockResolvedValueOnce({ rows: [{ id_medicamento: 12 }] })
+      .mockResolvedValueOnce()
+      .mockResolvedValueOnce()
       .mockResolvedValueOnce();
 
     await actualizarHorarioMedicamento({
@@ -230,26 +282,118 @@ describe('controlador de horarios', () => {
       },
     }, respuesta);
 
-    expect(pool.query).toHaveBeenCalledTimes(2);
+    expect(client.query).toHaveBeenNthCalledWith(1, 'BEGIN');
+    expect(client.query).toHaveBeenNthCalledWith(
+      3,
+      expect.stringContaining('UPDATE medicamento'),
+      ['Nuevo nombre', '10 mg', 'Jarabe', 12]
+    );
+    expect(client.query).toHaveBeenLastCalledWith('COMMIT');
+    expect(client.release).toHaveBeenCalled();
     expect(respuesta.status).toHaveBeenCalledWith(200);
     expect(respuesta.json).toHaveBeenCalledWith({ mensaje: 'Toma actualizada exitosamente' });
   });
 
-  it('elimina un medicamento y su registro asociado', async () => {
+  it('actualiza un turno dentro de una transacción y valida el grupo asignado', async () => {
     const respuesta = crearRespuesta();
-    pool.query
+    const client = crearCliente();
+    pool.connect.mockResolvedValueOnce(client);
+    client.query
+      .mockResolvedValueOnce()
+      .mockResolvedValueOnce({ rows: [{ id_grupo: 8 }] })
+      .mockResolvedValueOnce({ rows: [{ id_horario_cuidado: 6 }] })
+      .mockResolvedValueOnce({ rows: [{ nombre_usuario: 'Ana' }] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce()
+      .mockResolvedValueOnce({ rows: [{ id_horario_cuidado: 6 }] })
+      .mockResolvedValueOnce();
+
+    await actualizarHorarioCuidado({
+      params: { id: '6' },
+      body: {
+        id_grupo: 8,
+        id_cuidador: 4,
+        fecha_inicio: '2026-09-07',
+        fecha_fin: '2026-09-07',
+        hora_inicio: '08:00',
+        hora_fin: '16:00',
+      },
+    }, respuesta);
+
+    expect(client.query).toHaveBeenNthCalledWith(7, expect.stringContaining('UPDATE horario_cuidado'), [
+      4, 'Ana', '08:00:00', '16:00:00', '2026-09-07', '2026-09-07', '6',
+    ]);
+    expect(client.query).toHaveBeenLastCalledWith('COMMIT');
+    expect(client.release).toHaveBeenCalled();
+    expect(respuesta.status).toHaveBeenCalledWith(200);
+  });
+
+  it('elimina una toma pero conserva el medicamento si tiene otras repeticiones', async () => {
+    const respuesta = crearRespuesta();
+    const cliente = crearCliente();
+    pool.connect.mockResolvedValueOnce(cliente);
+    cliente.query
+      .mockResolvedValueOnce()
       .mockResolvedValueOnce({ rows: [{ id_medicamento: 12 }] })
+      .mockResolvedValueOnce({ rows: [{ id_horario_medicamento: 4 }] })
       .mockResolvedValueOnce();
 
     await eliminarHorarioMedicamento({ params: { id: '3' } }, respuesta);
 
-    expect(pool.query).toHaveBeenNthCalledWith(
-      2,
-      'DELETE FROM medicamento WHERE id_medicamento = $1',
+    expect(cliente.query).toHaveBeenCalledWith(
+      'SELECT 1 FROM horario_medicamento WHERE id_medicamento = $1 LIMIT 1',
       [12]
     );
+    expect(cliente.query).not.toHaveBeenCalledWith('DELETE FROM medicamento WHERE id_medicamento = $1', [12]);
+    expect(cliente.query).toHaveBeenLastCalledWith('COMMIT');
+    expect(cliente.release).toHaveBeenCalled();
     expect(respuesta.status).toHaveBeenCalledWith(200);
     expect(respuesta.json).toHaveBeenCalledWith({ mensaje: 'Toma eliminada exitosamente' });
+  });
+
+  it('elimina el medicamento cuando se borra su última toma', async () => {
+    const respuesta = crearRespuesta();
+    const cliente = crearCliente();
+    pool.connect.mockResolvedValueOnce(cliente);
+    cliente.query
+      .mockResolvedValueOnce()
+      .mockResolvedValueOnce({ rows: [{ id_medicamento: 12 }] })
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce()
+      .mockResolvedValueOnce();
+
+    await eliminarHorarioMedicamento({ params: { id: '3' } }, respuesta);
+
+    expect(cliente.query).toHaveBeenNthCalledWith(4, 'DELETE FROM medicamento WHERE id_medicamento = $1', [12]);
+    expect(cliente.query).toHaveBeenLastCalledWith('COMMIT');
+    expect(cliente.release).toHaveBeenCalled();
+    expect(respuesta.status).toHaveBeenCalledWith(200);
+  });
+
+  it('rechaza un número excesivo de repeticiones', async () => {
+    const respuesta = crearRespuesta();
+    const cliente = crearCliente();
+    pool.connect.mockResolvedValueOnce(cliente);
+
+    await crearHorarioMedicamento({
+      body: {
+        id_grupo: 8,
+        fecha_inicio: '2026-09-30',
+        nombre_medicamento: 'Paracetamol',
+        dosis: '500 mg',
+        presentacion: 'Tableta',
+        hora_toma: '08:00',
+        intervalo_horas: 1,
+        repeticiones: 1000000,
+      },
+    }, respuesta);
+
+    expect(cliente.query).not.toHaveBeenCalled();
+    expect(cliente.release).toHaveBeenCalled();
+    expect(respuesta.status).toHaveBeenCalledWith(400);
+    expect(respuesta.json).toHaveBeenCalledWith({
+      error: 'Las repeticiones deben ser de 1 a 365 y el intervalo de 1 a 168 horas',
+    });
   });
 
   it('devuelve 404 al eliminar un turno inexistente', async () => {

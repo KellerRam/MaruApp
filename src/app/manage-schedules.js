@@ -1,11 +1,18 @@
 // src/app/manage-operations.js
 import { Feather } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import FormPickerInput from '../components/ui/FormPickerInput';
 import { API_URL } from '../config/api';
+import { apiFetch as fetch } from '../config/apiFetch';
 
 export default function ManageOperationsScreen() {
+  const montadaRef = useRef(false);
+  const ahora = new Date();
+  const fechaHoyISO = `${ahora.getFullYear()}-${String(ahora.getMonth() + 1).padStart(2, '0')}-${String(ahora.getDate()).padStart(2, '0')}`;
+  const horaActualStr = `${String(ahora.getHours()).padStart(2, '0')}:${String(ahora.getMinutes()).padStart(2, '0')}`;
+
   const [tipoAccion, setTipoAccion] = useState(null); // 'agregar', 'editar', 'borrar'
   const [tipoEntidad, setTipoEntidad] = useState('medicamento'); // 'medicamento', 'cuidado', 'evento'
 
@@ -30,25 +37,32 @@ export default function ManageOperationsScreen() {
   const [fechaEvento, setFechaEvento] = useState('');
 
   useEffect(() => {
+    montadaRef.current = true;
     cargarCuidadoresGrupo();
+    return () => { montadaRef.current = false; };
   }, []);
 
   const cargarCuidadoresGrupo = async () => {
     try {
       const idUsuario = await AsyncStorage.getItem('userId');
       const idGrupoGuardado = await AsyncStorage.getItem('groupId');
+      if (!montadaRef.current) return;
       let idGrupo = idGrupoGuardado;
       if (!idGrupo && idUsuario) {
         const grupoRespuesta = await fetch(`${API_URL}/api/groups/user/${idUsuario}`);
+        if (!montadaRef.current) return;
+        if (!grupoRespuesta.ok) throw new Error('No se pudo cargar el grupo');
         const grupoDatos = await grupoRespuesta.json();
+        if (!montadaRef.current) return;
         idGrupo = grupoDatos.grupo?.id_grupo?.toString();
       }
       if (!idGrupo) return;
 
       const respuesta = await fetch(`${API_URL}/api/groups/${idGrupo}/members`);
+      if (!montadaRef.current) return;
       if (respuesta.ok) {
         const datos = await respuesta.json();
-        setCuidadoresDisponibles(datos.miembros || []);
+        if (montadaRef.current) setCuidadoresDisponibles(datos.miembros || []);
       }
     } catch (error) {
       console.error('Error al cargar cuidadores:', error);
@@ -74,8 +88,9 @@ export default function ManageOperationsScreen() {
       if (!idGrupo) return;
 
       const respuesta = await fetch(`${API_URL}/api/schedules/${idGrupo}`);
+      if (!montadaRef.current) return;
       const datos = await respuesta.json();
-      if (respuesta.ok) {
+      if (respuesta.ok && montadaRef.current) {
         if (entidad === 'medicamento') setElementosLista(datos.medicamentos || []);
         if (entidad === 'cuidado') setElementosLista(datos.horariosCuidado || []);
         if (entidad === 'evento') setElementosLista(datos.eventosProximos || []);
@@ -154,16 +169,46 @@ export default function ManageOperationsScreen() {
                   <Text>{c.nombre}</Text>
                 </TouchableOpacity>
               ))}
-              <TextInput style={estilos.input} placeholder="Hora inicio (HH:MM)" value={horaInicioCuidado} onChangeText={setHoraInicioCuidado} />
-              <TextInput style={estilos.input} placeholder="Hora fin (HH:MM)" value={horaFinCuidado} onChangeText={setHoraFinCuidado} />
+              <FormPickerInput
+                pickerType="time"
+                modalTitle="Hora de inicio"
+                style={estilos.input}
+                placeholder="Hora inicio (HH:MM)"
+                value={horaInicioCuidado}
+                onChangeText={setHoraInicioCuidado}
+                minTime={tipoAccion === 'agregar' ? horaActualStr : null}
+              />
+              <FormPickerInput
+                pickerType="time"
+                modalTitle="Hora de fin"
+                style={estilos.input}
+                placeholder="Hora fin (HH:MM)"
+                value={horaFinCuidado}
+                onChangeText={setHoraFinCuidado}
+              />
             </>
           )}
 
           {tipoEntidad === 'evento' && (
             <>
               <TextInput style={estilos.input} placeholder="Nombre del evento" value={nombreEvento} onChangeText={setNombreEvento} />
-              <TextInput style={estilos.input} placeholder="Hora (HH:MM)" value={horaEvento} onChangeText={setHoraEvento} />
-              <TextInput style={estilos.input} placeholder="Fecha (YYYY-MM-DD)" value={fechaEvento} onChangeText={setFechaEvento} />
+              <FormPickerInput
+                pickerType="time"
+                modalTitle="Hora del evento"
+                style={estilos.input}
+                placeholder="Hora (HH:MM)"
+                value={horaEvento}
+                onChangeText={setHoraEvento}
+              />
+              <FormPickerInput
+                pickerType="date"
+                modalTitle="Fecha del evento"
+                style={estilos.input}
+                placeholder="Fecha (YYYY-MM-DD)"
+                value={fechaEvento}
+                onChangeText={setFechaEvento}
+                minDate={tipoAccion === 'agregar' ? fechaHoyISO : null}
+              />
             </>
           )}
 

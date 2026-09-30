@@ -3,6 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import {
+    Modal,
     ScrollView,
     StyleSheet,
     Text,
@@ -10,7 +11,10 @@ import {
     TouchableOpacity,
     View
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { API_URL } from '../config/api';
+import { apiFetch as fetch } from '../config/apiFetch';
+import { cerrarSesion } from '../utils/session';
 
 export default function UserProfileScreen() {
   const router = useRouter();
@@ -20,35 +24,47 @@ export default function UserProfileScreen() {
 
   const [datosOriginales, setDatosOriginales] = useState(null);
   const [datosEditados, setDatosEditados] = useState(null);
+  const [modalEliminar, setModalEliminar] = useState(false);
+  const [passwordEliminar, setPasswordEliminar] = useState('');
+  const [eliminando, setEliminando] = useState(false);
+  const [errorEliminar, setErrorEliminar] = useState('');
 
   useEffect(() => {
+    let activo = true;
     const cargarPerfil = async () => {
-      const idUsuario = await AsyncStorage.getItem('userId');
-      if (!idUsuario) {
-        router.replace('/login');
-        return;
+      try {
+        const idUsuario = await AsyncStorage.getItem('userId');
+        if (!activo) return;
+        if (!idUsuario) {
+          router.replace('/login');
+          return;
+        }
+
+        const respuesta = await fetch(`${API_URL}/api/auth/user/${idUsuario}`);
+        if (!respuesta.ok) throw new Error('No se pudo cargar el perfil');
+
+        const datos = await respuesta.json();
+        if (!activo) return;
+        const fecha = datos.usuario.fecha_nacimiento_usuario?.split('T')[0].split('-') || ['', '', ''];
+        const perfil = {
+          nombre: datos.usuario.nombre_usuario || '',
+          correo: datos.usuario.correo || '',
+          genero: datos.usuario.genero || '',
+          dia: fecha[2] || '',
+          mes: fecha[1] || '',
+          anio: fecha[0] || '',
+        };
+        setDatosOriginales(perfil);
+        setDatosEditados(perfil);
+      } catch (error) {
+        if (activo) setErrorMsg(error.message);
+      } finally {
+        if (activo) setCargando(false);
       }
-
-      const respuesta = await fetch(`${API_URL}/api/auth/user/${idUsuario}`);
-      if (!respuesta.ok) throw new Error('No se pudo cargar el perfil');
-
-      const datos = await respuesta.json();
-      const fecha = datos.usuario.fecha_nacimiento_usuario?.split('T')[0].split('-') || ['', '', ''];
-      const perfil = {
-        nombre: datos.usuario.nombre_usuario || '',
-        correo: datos.usuario.correo || '',
-        genero: datos.usuario.genero || '',
-        dia: fecha[2] || '',
-        mes: fecha[1] || '',
-        anio: fecha[0] || '',
-      };
-      setDatosOriginales(perfil);
-      setDatosEditados(perfil);
     };
 
-    cargarPerfil()
-      .catch((error) => setErrorMsg(error.message))
-      .finally(() => setCargando(false));
+    cargarPerfil();
+    return () => { activo = false; };
   }, [router]);
 
   const [enfoqueNombre, setEnfoqueNombre] = useState(false);
@@ -92,8 +108,42 @@ export default function UserProfileScreen() {
     if (seccion === 'fecha') setDatosEditados({ ...datosEditados, dia: datosOriginales.dia, mes: datosOriginales.mes, anio: datosOriginales.anio });
   };
 
+  const cerrarModalEliminar = () => {
+    setModalEliminar(false);
+    setPasswordEliminar('');
+    setErrorEliminar('');
+  };
+
+  const confirmarEliminarCuenta = async () => {
+    if (!passwordEliminar.trim()) {
+      setErrorEliminar('Ingresa tu contraseña para confirmar');
+      return;
+    }
+    setEliminando(true);
+    setErrorEliminar('');
+    try {
+      const idUsuario = await AsyncStorage.getItem('userId');
+      const respuesta = await fetch(`${API_URL}/api/auth/user/${idUsuario}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: passwordEliminar }),
+      });
+      const datos = await respuesta.json();
+      if (!respuesta.ok) throw new Error(datos.error || 'No se pudo eliminar la cuenta');
+
+      await cerrarSesion();
+      cerrarModalEliminar();
+      router.replace('/');
+    } catch (error) {
+      setErrorEliminar(error.message);
+    } finally {
+      setEliminando(false);
+    }
+  };
+
   return (
-    <ScrollView style={estilos.contenedor} contentContainerStyle={estilos.scrollContent}>
+    <SafeAreaView style={estilos.contenedor} edges={['top']}>
+      <ScrollView style={estilos.contenedor} contentContainerStyle={estilos.scrollContent}>
       
       {/* Botón Cerrar */}
       <View style={estilos.encabezado}>
@@ -102,15 +152,12 @@ export default function UserProfileScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* Avatar */}
+      {/* Avatar sin el ícono de lápiz */}
       <View style={estilos.contenedorAvatar}>
         <View style={estilos.circuloAvatar}>
           <Text style={estilos.textoAvatar}>
             {datosEditados.nombre.charAt(0).toUpperCase() || 'C'}
           </Text>
-          <View style={estilos.botonLapiz}>
-            <Feather name="edit-2" size={14} color="#FFF" />
-          </View>
         </View>
       </View>
 
@@ -174,6 +221,7 @@ export default function UserProfileScreen() {
         )}
       </View>
 
+      {/* SECCIÓN: FECHA DE NACIMIENTO */}
       <View style={estilos.seccionCampo}>
         <Text style={estilos.etiqueta}>Fecha de nacimiento</Text>
         <View style={estilos.contenedorFechas}>
@@ -231,7 +279,47 @@ export default function UserProfileScreen() {
 
       {errorMsg ? <Text style={estilos.mensajeError}>{errorMsg}</Text> : null}
 
-    </ScrollView>
+      {/* SECCIÓN: ELIMINAR CUENTA */}
+      <View style={estilos.seccionCampo}>
+        <TouchableOpacity style={estilos.btnEliminarCuenta} onPress={() => setModalEliminar(true)}>
+          <Feather name="trash-2" size={16} color="#B00020" style={{ marginRight: 8 }} />
+          <Text style={estilos.txtEliminarCuenta}>Eliminar cuenta</Text>
+        </TouchableOpacity>
+      </View>
+
+      <Modal visible={modalEliminar} transparent animationType="fade" onRequestClose={cerrarModalEliminar}>
+        <View style={estilos.fondoModalEliminar}>
+          <View style={estilos.cajaModalEliminar}>
+            <Text style={estilos.tituloModalEliminar}>Eliminar cuenta</Text>
+            <Text style={estilos.textoModalEliminar}>
+              Esta acción es permanente. Ingresa tu contraseña para confirmar la eliminación de tu cuenta.
+            </Text>
+            <TextInput
+              style={estilos.inputPasswordEliminar}
+              placeholder="Contraseña"
+              secureTextEntry
+              value={passwordEliminar}
+              onChangeText={setPasswordEliminar}
+            />
+            {errorEliminar ? <Text style={estilos.mensajeError}>{errorEliminar}</Text> : null}
+            <View style={estilos.botonesAccion}>
+              <TouchableOpacity onPress={cerrarModalEliminar} style={estilos.btnCancelar}>
+                <Text style={estilos.txtCancelar}>Cancelar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={confirmarEliminarCuenta}
+                style={estilos.btnConfirmarEliminar}
+                disabled={eliminando}
+              >
+                <Text style={estilos.txtGuardar}>{eliminando ? 'Eliminando...' : 'Eliminar'}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      </ScrollView>
+    </SafeAreaView>
   );
 }
 
@@ -241,9 +329,8 @@ const estilos = StyleSheet.create({
   encabezado: { flexDirection: 'row', justifyContent: 'flex-end', marginBottom: 10 },
   botonCerrar: { padding: 6 },
   contenedorAvatar: { alignItems: 'center', marginBottom: 20 },
-  circuloAvatar: { width: 110, height: 110, borderRadius: 55, backgroundColor: '#A8D8D0', justifyContent: 'center', alignItems: 'center', position: 'relative' },
+  circuloAvatar: { width: 110, height: 110, borderRadius: 55, backgroundColor: '#A8D8D0', justifyContent: 'center', alignItems: 'center' },
   textoAvatar: { fontSize: 45, fontWeight: '400', color: '#111' },
-  botonLapiz: { position: 'absolute', bottom: 4, right: 4, backgroundColor: '#666', width: 30, height: 30, borderRadius: 15, justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: '#FFF' },
   seccionCampo: { marginBottom: 20 },
   etiqueta: { fontSize: 14, color: '#000', marginBottom: 6, fontWeight: '400' },
   inputTexto: { borderWidth: 1, borderColor: '#888', borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10, fontSize: 16, backgroundColor: '#FFF' },
@@ -264,4 +351,12 @@ const estilos = StyleSheet.create({
   correo: { color: '#666', fontSize: 14, marginTop: 8 },
   mensajeError: { color: '#B00020', textAlign: 'center', marginBottom: 12 },
   estado: { flex: 1, textAlign: 'center', textAlignVertical: 'center', color: '#555' },
+  btnEliminarCuenta: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#B00020', borderRadius: 18, paddingVertical: 12 },
+  txtEliminarCuenta: { color: '#B00020', fontSize: 15, fontWeight: '600' },
+  fondoModalEliminar: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center' },
+  cajaModalEliminar: { width: '86%', maxWidth: 360, backgroundColor: '#FFF', borderRadius: 16, padding: 20 },
+  tituloModalEliminar: { fontSize: 18, fontWeight: 'bold', color: '#111', marginBottom: 10 },
+  textoModalEliminar: { fontSize: 14, color: '#444', marginBottom: 16, lineHeight: 20 },
+  inputPasswordEliminar: { borderWidth: 1, borderColor: '#888', borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10, fontSize: 16, backgroundColor: '#FFF', marginBottom: 8 },
+  btnConfirmarEliminar: { backgroundColor: '#B00020', paddingVertical: 8, paddingHorizontal: 20, borderRadius: 18 },
 });
