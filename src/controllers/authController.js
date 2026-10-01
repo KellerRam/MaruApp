@@ -114,6 +114,8 @@ const responderErrorCodigo = (res, error) => {
 const solicitarCodigo = async (req, res) => {
   try {
     const email = normalizarEmail(req.body?.email);
+    const password = req.body?.password;
+    
     if (!emailValido(email)) {
       return res.status(400).json({ error: 'Introduce un correo electrónico válido' });
     }
@@ -123,9 +125,13 @@ const solicitarCodigo = async (req, res) => {
       return res.status(400).json({ error: 'El usuario ya está registrado' });
     }
 
-    // En lugar de rechazar si no existe en verificacion_correo, 
-    // emitimos el código directamente (esto creará el registro si no existe o lo actualizará si ya estaba)
-    await emitirCodigoVerificacion(email);
+    // Si viene la contraseña (desde el paso 1), la ciframos y la guardamos de una vez
+    let passwordHash = null;
+    if (typeof password === 'string' && password.trim() !== '') {
+      passwordHash = await bcrypt.hash(password, 10);
+    }
+
+    await emitirCodigoVerificacion(email, passwordHash);
     return res.status(200).json({ mensaje: 'Código de verificación enviado con éxito' });
   } catch (error) {
     return responderErrorCodigo(res, error);

@@ -19,14 +19,17 @@ export default function SignupScreen() {
   const [mes, setMes] = useState('');
   const [anio, setAnio] = useState('');
 
-  const solicitarCodigo = async (reenviar = false) => {
+const solicitarCodigo = async (reenviar = false) => {
     if (!email.trim() || (!reenviar && !password.trim())) {
       alert(reenviar ? 'No se encontró el correo de registro.' : 'Por favor, ingresa correo y contraseña.');
       return;
     }
 
     try {
-      const respuesta = await fetch(`${API_URL}/api/auth/${reenviar ? 'request-code' : 'signup'}`, {
+      // Usamos /api/auth/request-code para ambos o ajustamos según corresponda, 
+      // pero enviando la contraseña para que el backend la almacene temporalmente.
+      const endpoint = reenviar ? 'request-code' : 'signup';
+      const respuesta = await fetch(`${API_URL}/api/auth/${endpoint}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(reenviar ? { email } : { email, password })
