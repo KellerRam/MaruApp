@@ -122,14 +122,8 @@ const solicitarCodigo = async (req, res) => {
       return res.status(400).json({ error: 'El usuario ya está registrado' });
     }
 
-    const pendiente = await pool.query(
-      'SELECT password_hash, verificado_en FROM verificacion_correo WHERE correo = $1',
-      [email]
-    );
-    if (!pendiente.rows[0]?.password_hash || pendiente.rows[0].verificado_en) {
-      return res.status(400).json({ error: 'No hay un registro pendiente para ese correo' });
-    }
-
+    // En lugar de rechazar si no existe en verificacion_correo, 
+    // emitimos el código directamente (esto creará el registro si no existe o lo actualizará si ya estaba)
     await emitirCodigoVerificacion(email);
     return res.status(200).json({ mensaje: 'Código de verificación enviado con éxito' });
   } catch (error) {
