@@ -69,6 +69,7 @@ const emitirCodigoVerificacion = async (email, passwordHash = null) => {
      VALUES ($1, $2, $3, NOW() + INTERVAL '10 minutes', 0, NULL, NOW())
      ON CONFLICT (correo) DO UPDATE SET
        codigo_hash = EXCLUDED.codigo_hash,
+       -- Si viene un nuevo password_hash lo actualiza, de lo contrario MANTIENE el anterior que ya estaba guardado
        password_hash = COALESCE(EXCLUDED.password_hash, verificacion_correo.password_hash),
        expira_en = EXCLUDED.expira_en,
        intentos = 0,
