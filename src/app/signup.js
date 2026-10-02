@@ -27,12 +27,18 @@ const solicitarCodigo = async (reenviar = false) => {
 
     try {
       const endpoint = reenviar ? 'request-code' : 'signup';
+      console.log("Enviando petición a:", `${API_URL}/api/auth/${endpoint}`); // <-- Ver la URL
+      
       const respuesta = await fetch(`${API_URL}/api/auth/${endpoint}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password })
       });
+      
       const datos = await respuesta.json();
+      console.log("STATUS servidor (Paso 1):", respuesta.status); // <-- Ver código HTTP
+      console.log("DATOS servidor (Paso 1):", datos);             // <-- Ver mensaje del servidor
+
       if (respuesta.ok) {
         if (!reenviar) setPaso(2);
         else alert('Código reenviado con éxito');
@@ -40,6 +46,7 @@ const solicitarCodigo = async (reenviar = false) => {
         alert(datos.error || 'Error al registrarse');
       }
     } catch (error) {
+      console.log("ERROR DE RED (Paso 1):", error); // <-- Ver si la app rechaza la conexión
       alert('No se pudo conectar con el servidor');
     }
   };
