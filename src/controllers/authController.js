@@ -165,7 +165,14 @@ const verificarCodigo = async (req, res) => {
     }
 
     const codigoHash = hashCodigo(email, codigo);
-    if (registro.codigo_hash !== codigoHash) {
+    
+    // .trim() elimina los espacios en blanco que añade el tipo 'bpchar' de Postgres
+    const hashBdLimpio = typeof registro.codigo_hash === 'string' ? registro.codigo_hash.trim() : '';
+    
+    const hashCoincide = hashBdLimpio.length === codigoHash.length &&
+      crypto.timingSafeEqual(Buffer.from(hashBdLimpio, 'hex'), Buffer.from(codigoHash, 'hex'));
+
+    if (!hashCoincide) {
       return res.status(400).json({ error: 'Código incorrecto.' });
     }
 
