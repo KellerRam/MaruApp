@@ -1,3 +1,4 @@
+// src/controllers/authController.js
 const pool = require('../config/db');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
@@ -55,6 +56,56 @@ const enviarCodigoPorCorreo = async (email, codigo) => {
   }
 };
 
+const emitirCodigoVerificacion = async (email, passwordHash = null) => {
+  const codigo = crypto.randomInt(100000, 1000000).toString();
+  const codigoHash = hashCodigo(email, codigo);
+  
+  // Si viene un passwordHash lo usamos; si no, preservamos el que ya estaba en la base de datos
+  const guardado = await pool.query(
+    `INSERT INTO verificacion_correo (correo, codigo_hash, password_hash, expira_en, intentos, verificado_en, ultimo_envio)
+     VALUES ($1, $2, $3, NOW() + INTERVAL '15 minutes', 0, NULL, NOW())
+     ON CONFLICT (correo) DO UPDATE SET
+       codigo_hash = EXCLUDED.codigo_hash,
+       password_hash = COALESCE(EXCLUDED.password_hash, verificacion_correo.password_hash),
+       expira_en = EXCLUDED.expira_en,
+       intentos = 0,
+       verificado_en = NULL,
+       ultimo_envio = NOW()
+     RETURNING correo`,
+    [email, codigoHash, passwordHash]
+  );
+
+  if (guardado.rows.length === 0) {
+    const error = new Error('Espera un minuto antes de solicitar otro código');
+    error.statusCode = 429;
+    throw error;
+  }
+
+  try {
+    await enviarCodigoPorCorreo(email, codigo);
+  } catch (error) {
+    await pool.query(
+      `UPDATE verificacion_correo
+       SET codigo_hash = NULL, intentos = 0, expira_en = NOW()
+       WHERE correo = $1 AND codigo_hash = $2`,
+      [email, codigoHash]
+    );
+    error.statusCode ||= 503;
+    throw error;
+  }
+};
+
+const responderErrorCodigo = (res, error) => {
+  console.error('Error en la verificación de correo:', error.message);
+  const statusCode = error.statusCode || 500;
+  const mensaje = statusCode === 429
+    ? error.message
+    : statusCode === 503
+      ? 'No se pudo enviar el código. Intenta más tarde o revisa el servicio de correo.'
+      : 'No se pudo procesar la solicitud de verificación';
+  return res.status(statusCode).json({ error: mensaje });
+};
+
 const solicitarCodigo = async (req, res) => {
   try {
     const email = normalizarEmail(req.body?.email);
@@ -74,32 +125,14 @@ const solicitarCodigo = async (req, res) => {
       passwordHash = await bcrypt.hash(password, 10);
     }
 
-    const codigo = crypto.randomInt(100000, 1000000).toString();
-    const codigoHash = hashCodigo(email, codigo);
-
-    // Upsert seguro en verificacion_correo asegurando que password_hash nunca se pierda
-    await pool.query(
-      `INSERT INTO verificacion_correo (correo, codigo_hash, password_hash, expira_en, intentos, verificado_en, ultimo_envio)
-       VALUES ($1, $2, $3, NOW() + INTERVAL '15 minutes', 0, NULL, NOW())
-       ON CONFLICT (correo) DO UPDATE SET
-         codigo_hash = EXCLUDED.codigo_hash,
-         password_hash = COALESCE(EXCLUDED.password_hash, verificacion_correo.password_hash),
-         expira_en = EXCLUDED.expira_en,
-         intentos = 0,
-         verificado_en = NULL,
-         ultimo_envio = NOW()`,
-      [email, codigoHash, passwordHash]
-    );
-
-    await enviarCodigoPorCorreo(email, codigo);
+    await emitirCodigoVerificacion(email, passwordHash);
     return res.status(200).json({ mensaje: 'Código de verificación enviado con éxito' });
   } catch (error) {
-    console.error('Error en solicitarCodigo:', error.message);
-    return res.status(error.statusCode || 500).json({ error: error.message || 'No se pudo enviar el código' });
+    return responderErrorCodigo(res, error);
   }
 };
 
-const registrarUsuario = solicitarCodigo; // Alias por compatibilidad con la ruta signup
+const registrarUsuario = solicitarCodigo;
 
 const verificarCodigo = async (req, res) => {
   try {
@@ -129,7 +162,8 @@ const verificarCodigo = async (req, res) => {
       return res.status(400).json({ error: 'Código incorrecto.' });
     }
 
-    // Marcar como verificado con amplitud de tiempo
+    // Al verificar el código, borramos el código hash y marcamos verificado_en, 
+    // PERO NUNCA tocamos ni borramos el password_hash
     await pool.query(
       `UPDATE verificacion_correo
        SET codigo_hash = NULL, verificado_en = NOW(), expira_en = NOW() + INTERVAL '1 hour'
@@ -145,7 +179,6 @@ const verificarCodigo = async (req, res) => {
 };
 
 const completarPerfil = async (req, res) => {
-  console.log('📦 Datos recibidos en completarPerfil:', req.body);
   const emailLimpio = normalizarEmail(req.body?.email);
   const { nombre, genero, fechaNacimiento } = req.body || {};
 
@@ -158,32 +191,28 @@ const completarPerfil = async (req, res) => {
     client = await pool.connect();
     await client.query('BEGIN');
 
-    // Buscamos cualquier registro previo de este correo en la tabla temporal
-    let datosTempResult = await client.query(
-      `SELECT password_hash FROM verificacion_correo WHERE LOWER(correo) = $1`,
+    // Consultamos de forma segura el password_hash real que se guardó en el Paso 1
+    const datosTempResult = await client.query(
+      `SELECT password_hash FROM verificacion_correo WHERE LOWER(correo) = $1 FOR UPDATE`,
       [emailLimpio]
     );
-    let datosTemp = datosTempResult.rows[0];
+    const datosTemp = datosTempResult.rows[0];
 
-    // Si por alguna razón el password_hash se perdió en la tabla temporal pero el correo existía, 
-    // generamos un respaldo temporal para evitar bloquear al usuario en producción.
-    let passwordFinal = datosTemp?.password_hash;
-    if (!passwordFinal) {
-      console.warn('⚠️ Advertencia: No se encontró password_hash en verificacion_correo para:', emailLimpio);
-      // Creamos un hash por defecto seguro temporalmente si faltara
-      passwordFinal = await bcrypt.hash('MaruApp2026*', 10);
+    if (!datosTemp || !datosTemp.password_hash) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Sesión de registro expirada.' });
     }
 
-    // Insertar el usuario definitivo en la tabla Usuario
+    // Insertamos el usuario definitivo con su contraseña real cifrada
     const nuevoUsuario = await client.query(
       'INSERT INTO Usuario (nombre_usuario, password_usuario, fecha_nacimiento_usuario, genero, correo) VALUES ($1, $2, $3, $4, $5) RETURNING id_usuario',
-      [nombre.trim(), passwordFinal, fechaNacimiento, genero, emailLimpio]
+      [nombre.trim(), datosTemp.password_hash, fechaNacimiento, genero, emailLimpio]
     );
 
     const idUsuario = nuevoUsuario.rows[0].id_usuario;
     const token = jwt.sign({ id: idUsuario, email: emailLimpio }, process.env.JWT_SECRET, { expiresIn: '7d' });
 
-    // Limpiar el registro temporal de forma segura
+    // Limpiamos la tabla temporal
     await client.query('DELETE FROM verificacion_correo WHERE LOWER(correo) = $1', [emailLimpio]);
     await client.query('COMMIT');
 
