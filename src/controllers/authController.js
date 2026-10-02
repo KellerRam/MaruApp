@@ -145,6 +145,7 @@ const verificarCodigo = async (req, res) => {
 };
 
 const completarPerfil = async (req, res) => {
+  console.log('📦 Datos recibidos en completarPerfil:', req.body);
   const emailLimpio = normalizarEmail(req.body?.email);
   const { nombre, genero, fechaNacimiento } = req.body || {};
 
