@@ -60,7 +60,7 @@ const emitirCodigoVerificacion = async (email, passwordHash = null) => {
   const codigo = crypto.randomInt(100000, 1000000).toString();
   const codigoHash = hashCodigo(email, codigo);
   
-  // Si viene un passwordHash lo usamos; si no, preservamos el que ya estaba en la base de datos
+  // Incluye la cláusula WHERE para respetar el intervalo de 60 segundos en reenvíos
   const guardado = await pool.query(
     `INSERT INTO verificacion_correo (correo, codigo_hash, password_hash, expira_en, intentos, verificado_en, ultimo_envio)
      VALUES ($1, $2, $3, NOW() + INTERVAL '15 minutes', 0, NULL, NOW())
@@ -71,6 +71,7 @@ const emitirCodigoVerificacion = async (email, passwordHash = null) => {
        intentos = 0,
        verificado_en = NULL,
        ultimo_envio = NOW()
+     WHERE verificacion_correo.ultimo_envio <= NOW() - INTERVAL '60 seconds'
      RETURNING correo`,
     [email, codigoHash, passwordHash]
   );
@@ -124,16 +125,11 @@ const solicitarCodigo = async (req, res) => {
     if (typeof password === 'string' && password.trim() !== '') {
       passwordHash = await bcrypt.hash(password, 10);
     } else {
-      // Si por alguna razón la app no mandó la contraseña (ej. en un reenvío), 
-      // buscamos si ya existía una contraseña previa en la tabla temporal para no sobrescribirla con NULL
+      // Si la petición viene de un reenvío sin contraseña, rescatamos la existente para no perderla
       const tempAntiguo = await pool.query('SELECT password_hash FROM verificacion_correo WHERE LOWER(correo) = $1', [email]);
       if (tempAntiguo.rows.length > 0 && tempAntiguo.rows[0].password_hash) {
         passwordHash = tempAntiguo.rows[0].password_hash;
       }
-    }
-
-    if (!passwordHash) {
-      return res.status(400).json({ error: 'La contraseña es obligatoria' });
     }
 
     await emitirCodigoVerificacion(email, passwordHash);
@@ -173,8 +169,7 @@ const verificarCodigo = async (req, res) => {
       return res.status(400).json({ error: 'Código incorrecto.' });
     }
 
-    // Al verificar el código, borramos el código hash y marcamos verificado_en, 
-    // PERO NUNCA tocamos ni borramos el password_hash
+    // Al verificar, borramos el código hash y marcamos verificado, manteniendo intacto el password_hash
     await pool.query(
       `UPDATE verificacion_correo
        SET codigo_hash = NULL, verificado_en = NOW(), expira_en = NOW() + INTERVAL '1 hour'
@@ -202,7 +197,6 @@ const completarPerfil = async (req, res) => {
     client = await pool.connect();
     await client.query('BEGIN');
 
-    // Consultamos de forma segura el password_hash real que se guardó en el Paso 1
     const datosTempResult = await client.query(
       `SELECT password_hash FROM verificacion_correo WHERE LOWER(correo) = $1 FOR UPDATE`,
       [emailLimpio]
@@ -214,7 +208,6 @@ const completarPerfil = async (req, res) => {
       return res.status(400).json({ error: 'Sesión de registro expirada.' });
     }
 
-    // Insertamos el usuario definitivo con su contraseña real cifrada
     const nuevoUsuario = await client.query(
       'INSERT INTO Usuario (nombre_usuario, password_usuario, fecha_nacimiento_usuario, genero, correo) VALUES ($1, $2, $3, $4, $5) RETURNING id_usuario',
       [nombre.trim(), datosTemp.password_hash, fechaNacimiento, genero, emailLimpio]
@@ -223,7 +216,6 @@ const completarPerfil = async (req, res) => {
     const idUsuario = nuevoUsuario.rows[0].id_usuario;
     const token = jwt.sign({ id: idUsuario, email: emailLimpio }, process.env.JWT_SECRET, { expiresIn: '7d' });
 
-    // Limpiamos la tabla temporal
     await client.query('DELETE FROM verificacion_correo WHERE LOWER(correo) = $1', [emailLimpio]);
     await client.query('COMMIT');
 
