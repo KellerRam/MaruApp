@@ -20,8 +20,8 @@ export default function SignupScreen() {
   const [anio, setAnio] = useState('');
 
 const solicitarCodigo = async (reenviar = false) => {
-    if (!email.trim() || (!reenviar && !password.trim())) {
-      alert(reenviar ? 'No se encontró el correo de registro.' : 'Por favor, ingresa correo y contraseña.');
+    if (!email.trim() || !password.trim()) {
+      alert('Por favor, ingresa correo y contraseña.');
       return;
     }
 
@@ -30,11 +30,12 @@ const solicitarCodigo = async (reenviar = false) => {
       const respuesta = await fetch(`${API_URL}/api/auth/${endpoint}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(reenviar ? { email } : { email, password })
+        body: JSON.stringify({ email, password })
       });
       const datos = await respuesta.json();
       if (respuesta.ok) {
-        setPaso(2);
+        if (!reenviar) setPaso(2);
+        else alert('Código reenviado con éxito');
       } else {
         alert(datos.error || 'Error al registrarse');
       }

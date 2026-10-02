@@ -123,6 +123,17 @@ const solicitarCodigo = async (req, res) => {
     let passwordHash = null;
     if (typeof password === 'string' && password.trim() !== '') {
       passwordHash = await bcrypt.hash(password, 10);
+    } else {
+      // Si por alguna razón la app no mandó la contraseña (ej. en un reenvío), 
+      // buscamos si ya existía una contraseña previa en la tabla temporal para no sobrescribirla con NULL
+      const tempAntiguo = await pool.query('SELECT password_hash FROM verificacion_correo WHERE LOWER(correo) = $1', [email]);
+      if (tempAntiguo.rows.length > 0 && tempAntiguo.rows[0].password_hash) {
+        passwordHash = tempAntiguo.rows[0].password_hash;
+      }
+    }
+
+    if (!passwordHash) {
+      return res.status(400).json({ error: 'La contraseña es obligatoria' });
     }
 
     await emitirCodigoVerificacion(email, passwordHash);
