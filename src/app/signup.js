@@ -26,8 +26,6 @@ const solicitarCodigo = async (reenviar = false) => {
     }
 
     try {
-      // Usamos /api/auth/request-code para ambos o ajustamos según corresponda, 
-      // pero enviando la contraseña para que el backend la almacene temporalmente.
       const endpoint = reenviar ? 'request-code' : 'signup';
       const respuesta = await fetch(`${API_URL}/api/auth/${endpoint}`, {
         method: 'POST',
