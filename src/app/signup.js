@@ -58,10 +58,11 @@ const verificarCodigo = async () => {
       });
       
       const datos = await respuesta.json();
-      console.log("STATUS:", respuesta.status); // <--- ¿Qué número sale aquí? (ej. 200, 400, 404, 500)
-      console.log("DATOS:", datos);           // <--- ¿Qué mensaje devuelve?
+      console.log("STATUS:", respuesta.status);
+      console.log("DATOS:", datos);
 
       if (respuesta.ok) {
+        setCodigoUnico('');
         setPaso(3);
       } else {
         alert(datos.error || 'Código incorrecto');
