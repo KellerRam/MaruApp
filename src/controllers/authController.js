@@ -141,75 +141,46 @@ const solicitarCodigo = async (req, res) => {
 
 const registrarUsuario = solicitarCodigo;
 
-const verificarCodigo = async () => {
-  if (!codigoUnico.trim()) {
-    alert('Ingresa el código de verificación que enviamos a tu correo.');
-    return;
-  }
-
+const verificarCodigo = async (req, res) => {
   try {
-    const respuesta = await fetch(`${API_URL}/api/auth/verify`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, codigo: codigoUnico })
-    });
-    const datos = await respuesta.json();
-    console.log("Respuesta de verificación:", respuesta.status, datos); // <-- Mira esto en tu consola de Metro/Expo
+    const email = normalizarEmail(req.body?.email);
+    const codigo = typeof req.body?.codigo === 'string' ? req.body.codigo.trim() : '';
 
-    if (respuesta.ok) {
-      setPaso(3);
-    } else {
-      alert(datos.error || 'Código incorrecto');
-    }
-  } catch (error) {
-    console.error("Error de red en verify:", error);
-    alert('No se pudo conectar con el servidor');
-  }
-};
-
-const completarPerfil = async (req, res) => {
-  const emailLimpio = normalizarEmail(req.body?.email);
-  const { nombre, genero, fechaNacimiento } = req.body || {};
-
-  if (!emailValido(emailLimpio) || !nombre?.trim() || !['Masculino', 'Femenino', 'Otro'].includes(genero) || !fechaNacimiento) {
-    return res.status(400).json({ error: 'Todos los campos del perfil son obligatorios' });
-  }
-
-  let client;
-  try {
-    client = await pool.connect();
-    await client.query('BEGIN');
-
-    const datosTempResult = await client.query(
-      `SELECT password_hash FROM verificacion_correo WHERE LOWER(correo) = $1 FOR UPDATE`,
-      [emailLimpio]
-    );
-    const datosTemp = datosTempResult.rows[0];
-
-    if (!datosTemp || !datosTemp.password_hash) {
-      await client.query('ROLLBACK');
-      return res.status(400).json({ error: 'Sesión de registro expirada.' });
+    if (!emailValido(email) || !/^\d{6}$/.test(codigo)) {
+      return res.status(400).json({ error: 'Correo o código inválido' });
     }
 
-    const nuevoUsuario = await client.query(
-      'INSERT INTO Usuario (nombre_usuario, password_usuario, fecha_nacimiento_usuario, genero, correo) VALUES ($1, $2, $3, $4, $5) RETURNING id_usuario',
-      [nombre.trim(), datosTemp.password_hash, fechaNacimiento, genero, emailLimpio]
+    const resultado = await pool.query(
+      'SELECT codigo_hash, expira_en, intentos, verificado_en FROM verificacion_correo WHERE LOWER(correo) = $1',
+      [email]
+    );
+    const registro = resultado.rows[0];
+
+    if (!registro) {
+      return res.status(400).json({ error: 'Sesión expirada o correo no encontrado.' });
+    }
+
+    if (registro.verificado_en) {
+      return res.status(200).json({ mensaje: 'Código verificado correctamente' });
+    }
+
+    const codigoHash = hashCodigo(email, codigo);
+    if (registro.codigo_hash !== codigoHash) {
+      return res.status(400).json({ error: 'Código incorrecto.' });
+    }
+
+    // Actualizamos manteniendo el password_hash intacto
+    await pool.query(
+      `UPDATE verificacion_correo
+       SET codigo_hash = NULL, verificado_en = NOW(), expira_en = NOW() + INTERVAL '1 hour'
+       WHERE LOWER(correo) = $1`,
+      [email]
     );
 
-    const idUsuario = nuevoUsuario.rows[0].id_usuario;
-    const token = jwt.sign({ id: idUsuario, email: emailLimpio }, process.env.JWT_SECRET, { expiresIn: '7d' });
-
-    await client.query('DELETE FROM verificacion_correo WHERE LOWER(correo) = $1', [emailLimpio]);
-    await client.query('COMMIT');
-
-    return res.status(201).json({ mensaje: 'Usuario registrado exitosamente', token, tieneGrupo: false, idUsuario });
+    return res.status(200).json({ mensaje: 'Código verificado correctamente' });
   } catch (error) {
-    if (client) await client.query('ROLLBACK').catch(() => {});
-    if (error.code === '23505') return res.status(409).json({ error: 'El usuario ya está registrado' });
-    console.error('Error al completar el perfil:', error.message);
-    return res.status(500).json({ error: 'No se pudo completar el registro' });
-  } finally {
-    client?.release();
+    console.error('Error en verificarCodigo:', error.message);
+    return res.status(500).json({ error: 'No se pudo verificar el código' });
   }
 };
 

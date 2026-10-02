@@ -44,7 +44,7 @@ const solicitarCodigo = async (reenviar = false) => {
     }
   };
 
-  const verificarCodigo = async () => {
+const verificarCodigo = async () => {
     if (!codigoUnico.trim()) {
       alert('Ingresa el código de verificación que enviamos a tu correo.');
       return;
@@ -56,13 +56,18 @@ const solicitarCodigo = async (reenviar = false) => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, codigo: codigoUnico })
       });
+      
       const datos = await respuesta.json();
+      console.log("STATUS:", respuesta.status); // <--- ¿Qué número sale aquí? (ej. 200, 400, 404, 500)
+      console.log("DATOS:", datos);           // <--- ¿Qué mensaje devuelve?
+
       if (respuesta.ok) {
         setPaso(3);
       } else {
         alert(datos.error || 'Código incorrecto');
       }
     } catch (error) {
+      console.log("ERROR DE RED:", error);
       alert('No se pudo conectar con el servidor');
     }
   };
