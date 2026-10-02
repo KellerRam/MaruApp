@@ -340,6 +340,52 @@ const eliminarCuentaUsuario = async (req, res) => {
   }
 };
 
+const completarPerfil = async (req, res) => {
+  const emailLimpio = normalizarEmail(req.body?.email);
+  const { nombre, genero, fechaNacimiento } = req.body || {};
+
+  if (!emailValido(emailLimpio) || !nombre?.trim() || !['Masculino', 'Femenino', 'Otro'].includes(genero) || !fechaNacimiento) {
+    return res.status(400).json({ error: 'Todos los campos del perfil son obligatorios' });
+  }
+
+  let client;
+  try {
+    client = await pool.connect();
+    await client.query('BEGIN');
+
+    const datosTempResult = await client.query(
+      `SELECT password_hash FROM verificacion_correo WHERE LOWER(correo) = $1 FOR UPDATE`,
+      [emailLimpio]
+    );
+    const datosTemp = datosTempResult.rows[0];
+
+    if (!datosTemp || !datosTemp.password_hash) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Sesión de registro expirada.' });
+    }
+
+    const nuevoUsuario = await client.query(
+      'INSERT INTO Usuario (nombre_usuario, password_usuario, fecha_nacimiento_usuario, genero, correo) VALUES ($1, $2, $3, $4, $5) RETURNING id_usuario',
+      [nombre.trim(), datosTemp.password_hash, fechaNacimiento, genero, emailLimpio]
+    );
+
+    const idUsuario = nuevoUsuario.rows[0].id_usuario;
+    const token = jwt.sign({ id: idUsuario, email: emailLimpio }, process.env.JWT_SECRET, { expiresIn: '7d' });
+
+    await client.query('DELETE FROM verificacion_correo WHERE LOWER(correo) = $1', [emailLimpio]);
+    await client.query('COMMIT');
+
+    return res.status(201).json({ mensaje: 'Usuario registrado exitosamente', token, tieneGrupo: false, idUsuario });
+  } catch (error) {
+    if (client) await client.query('ROLLBACK').catch(() => {});
+    if (error.code === '23505') return res.status(409).json({ error: 'El usuario ya está registrado' });
+    console.error('Error al completar el perfil:', error.message);
+    return res.status(500).json({ error: 'No se pudo completar el registro' });
+  } finally {
+    client?.release();
+  }
+};
+
 module.exports = {
   solicitarCodigo,
   registrarUsuario,
