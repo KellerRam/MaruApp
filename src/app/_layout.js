@@ -88,11 +88,6 @@ function ContenidoMenuLateral(props) {
           <MaterialIcons name="fact-check" size={20} color="#333" style={estilosMenu.iconoOpcion} />
           <Text style={estilosMenu.textoOpcion}>Historial de síntomas</Text>
         </TouchableOpacity>
-
-        <TouchableOpacity style={estilosMenu.opcionItem}>
-          <Feather name="file-text" size={20} color="#333" style={estilosMenu.iconoOpcion} />
-          <Text style={estilosMenu.textoOpcion}>Permisos de la aplicación</Text>
-        </TouchableOpacity>
       </View>
 
       <View style={estilosMenu.pieMenu}>
