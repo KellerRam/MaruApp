@@ -26,8 +26,9 @@ const solicitarCodigo = async (reenviar = false) => {
     }
 
     try {
-      const endpoint = reenviar ? 'request-code' : 'signup';
-      console.log("Enviando petición a:", `${API_URL}/api/auth/${endpoint}`); // <-- Ver la URL
+      // Si se llama desde el botón de "Enviar código", usamos 'signup'. Si es reenvío, 'request-code'.
+      const endpoint = reenviar === true ? 'request-code' : 'signup';
+      console.log("Enviando petición a:", `${API_URL}/api/auth/${endpoint}`);
       
       const respuesta = await fetch(`${API_URL}/api/auth/${endpoint}`, {
         method: 'POST',
@@ -36,17 +37,20 @@ const solicitarCodigo = async (reenviar = false) => {
       });
       
       const datos = await respuesta.json();
-      console.log("STATUS servidor (Paso 1):", respuesta.status); // <-- Ver código HTTP
-      console.log("DATOS servidor (Paso 1):", datos);             // <-- Ver mensaje del servidor
+      console.log("STATUS servidor (Paso 1):", respuesta.status);
+      console.log("DATOS servidor (Paso 1):", datos);
 
       if (respuesta.ok) {
-        if (!reenviar) setPaso(2);
-        else alert('Código reenviado con éxito');
+        if (reenviar !== true) {
+          setPaso(2); // <--- Esto es lo que cambia la pantalla al Paso 2
+        } else {
+          alert('Código reenviado con éxito');
+        }
       } else {
         alert(datos.error || 'Error al registrarse');
       }
     } catch (error) {
-      console.log("ERROR DE RED (Paso 1):", error); // <-- Ver si la app rechaza la conexión
+      console.log("ERROR DE RED (Paso 1):", error);
       alert('No se pudo conectar con el servidor');
     }
   };
