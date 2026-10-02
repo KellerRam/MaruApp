@@ -141,46 +141,29 @@ const solicitarCodigo = async (req, res) => {
 
 const registrarUsuario = solicitarCodigo;
 
-const verificarCodigo = async (req, res) => {
+const verificarCodigo = async () => {
+  if (!codigoUnico.trim()) {
+    alert('Ingresa el código de verificación que enviamos a tu correo.');
+    return;
+  }
+
   try {
-    const email = normalizarEmail(req.body?.email);
-    const codigo = typeof req.body?.codigo === 'string' ? req.body.codigo.trim() : '';
+    const respuesta = await fetch(`${API_URL}/api/auth/verify`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, codigo: codigoUnico })
+    });
+    const datos = await respuesta.json();
+    console.log("Respuesta de verificación:", respuesta.status, datos); // <-- Mira esto en tu consola de Metro/Expo
 
-    if (!emailValido(email) || !/^\d{6}$/.test(codigo)) {
-      return res.status(400).json({ error: 'Correo o código inválido' });
+    if (respuesta.ok) {
+      setPaso(3);
+    } else {
+      alert(datos.error || 'Código incorrecto');
     }
-
-    const resultado = await pool.query(
-      'SELECT codigo_hash, expira_en, intentos, verificado_en FROM verificacion_correo WHERE LOWER(correo) = $1',
-      [email]
-    );
-    const registro = resultado.rows[0];
-
-    if (!registro) {
-      return res.status(400).json({ error: 'Sesión expirada o correo no encontrado.' });
-    }
-
-    if (registro.verificado_en) {
-      return res.status(200).json({ mensaje: 'Código verificado correctamente' });
-    }
-
-    const codigoHash = hashCodigo(email, codigo);
-    if (registro.codigo_hash !== codigoHash) {
-      return res.status(400).json({ error: 'Código incorrecto.' });
-    }
-
-    // Al verificar, borramos el código hash y marcamos verificado, manteniendo intacto el password_hash
-    await pool.query(
-      `UPDATE verificacion_correo
-       SET codigo_hash = NULL, verificado_en = NOW(), expira_en = NOW() + INTERVAL '1 hour'
-       WHERE LOWER(correo) = $1`,
-      [email]
-    );
-
-    return res.status(200).json({ mensaje: 'Código verificado correctamente' });
   } catch (error) {
-    console.error('Error en verificarCodigo:', error.message);
-    return res.status(500).json({ error: 'No se pudo verificar el código' });
+    console.error("Error de red en verify:", error);
+    alert('No se pudo conectar con el servidor');
   }
 };
 
