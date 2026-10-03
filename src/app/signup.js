@@ -19,14 +19,30 @@ export default function SignupScreen() {
   const [mes, setMes] = useState('');
   const [anio, setAnio] = useState('');
 
-const solicitarCodigo = async (reenviar = false) => {
+  const validarPassword = (pass) => {
+    if (pass.length < 8 || pass.length > 14) {
+      return 'La contraseña debe tener entre 8 y 14 caracteres.';
+    }
+    if (!/[A-Z]/.test(pass)) {
+      return 'La contraseña debe contener al menos una letra mayúscula.';
+    }
+    return null;
+  };
+
+  const solicitarCodigo = async (reenviar = false) => {
     if (!email.trim() || !password.trim()) {
       alert('Por favor, ingresa correo y contraseña.');
       return;
     }
+    if (reenviar !== true) {
+      const errorPassword = validarPassword(password);
+      if (errorPassword) {
+        alert(errorPassword);
+        return;
+      }
+    }
 
     try {
-      // Si se llama desde el botón de "Enviar código", usamos 'signup'. Si es reenvío, 'request-code'.
       const endpoint = reenviar === true ? 'request-code' : 'signup';
       console.log("Enviando petición a:", `${API_URL}/api/auth/${endpoint}`);
       
@@ -55,7 +71,7 @@ const solicitarCodigo = async (reenviar = false) => {
     }
   };
 
-const verificarCodigo = async () => {
+  const verificarCodigo = async () => {
     if (!codigoUnico.trim()) {
       alert('Ingresa el código de verificación que enviamos a tu correo.');
       return;
@@ -190,9 +206,9 @@ const verificarCodigo = async () => {
           <View style={estilos.grupoInput}>
             <Text style={estilos.etiqueta}>Fecha de nacimiento</Text>
             <View style={estilos.contenedorFechas}>
-              <TextInput style={estilos.inputFecha} placeholder="Día" maxLength={2} keyboardType="number-pad" value={dia} onChangeText={setDia} />
-              <TextInput style={estilos.inputFecha} placeholder="Mes" maxLength={2} keyboardType="number-pad" value={mes} onChangeText={setMes} />
-              <TextInput style={estilos.inputFecha} placeholder="Año" maxLength={4} keyboardType="number-pad" value={anio} onChangeText={setAnio} />
+              <TextInput style={estilos.inputFecha} placeholder="Día" placeholderTextColor="#48d9d9" maxLength={2} keyboardType="number-pad" value={dia} onChangeText={setDia} />
+              <TextInput style={estilos.inputFecha} placeholder="Mes" placeholderTextColor="#48d9d9" maxLength={2} keyboardType="number-pad" value={mes} onChangeText={setMes} />
+              <TextInput style={estilos.inputFecha} placeholder="Año" placeholderTextColor="#48d9d9" maxLength={4} keyboardType="number-pad" value={anio} onChangeText={setAnio} />
             </View>
           </View>
           <TouchableOpacity style={estilos.botonPrimario} onPress={guardarPerfilFinal}>

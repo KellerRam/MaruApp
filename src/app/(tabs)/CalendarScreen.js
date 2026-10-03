@@ -406,8 +406,6 @@ export default function PantallaCalendario() {
       setErrorFormulario('No se encontró el Grupo asignado');
       return;
     }
-
-    // --- VALIDACIÓN ESTRICTA DE FECHA Y HORA PASADA ---
     const fechaAValidar = tipoGestion === 'evento' ? fechaEvento : fechaFormulario;
     const horaAValidar = tipoGestion === 'cuidado' ? horaInicioCuidado : tipoGestion === 'medicamento' ? horaTomaMed : horaEvento;
 
@@ -818,7 +816,7 @@ export default function PantallaCalendario() {
             <TextInput
               style={estilos.inputBuscador}
               placeholder="Buscar..."
-              placeholderTextColor="#7E9A98"
+              placeholderTextColor="#48d9d9"
               value={busqueda}
               onChangeText={setBusqueda}
             />
@@ -1019,6 +1017,7 @@ export default function PantallaCalendario() {
                     <TextInput
                       style={estilos.inputForm}
                       placeholder="Ej. Paracetamol"
+                      placeholderTextColor="#48d9d9"
                       value={nombreMed}
                       onChangeText={setNombreMed}
                     />
@@ -1028,6 +1027,7 @@ export default function PantallaCalendario() {
                     <TextInput
                       style={estilos.inputForm}
                       placeholder="Ej. 1 mgr o 1 cc"
+                      placeholderTextColor="#48d9d9"
                       value={dosisMed}
                       onChangeText={setDosisMed}
                     />
@@ -1037,6 +1037,7 @@ export default function PantallaCalendario() {
                     <TextInput
                       style={estilos.inputForm}
                       placeholder="Ej. Pastilla, Jarabe..."
+                      placeholderTextColor="#48d9d9"
                       value={presentacionMed}
                       onChangeText={setPresentacionMed}
                     />
@@ -1070,6 +1071,7 @@ export default function PantallaCalendario() {
                       style={estilos.inputForm}
                       keyboardType="numeric"
                       placeholder="Ej. 8 (cada 8 horas)"
+                      placeholderTextColor="#48d9d9"
                       value={intervaloMed}
                       onChangeText={setIntervaloMed}
                     />
@@ -1080,6 +1082,7 @@ export default function PantallaCalendario() {
                       style={estilos.inputForm}
                       keyboardType="numeric"
                       placeholder="Ej. 3"
+                      placeholderTextColor="#48d9d9"
                       value={repeticionesMed}
                       onChangeText={setRepeticionesMed}
                     />
@@ -1089,7 +1092,7 @@ export default function PantallaCalendario() {
                 <>
                   <View style={estilos.grupoInputForm}>
                     <Text style={estilos.labelForm}>Nombre del evento *</Text>
-                    <TextInput style={estilos.inputForm} placeholder="Ej. Cita médica" value={nombreEvento} onChangeText={setNombreEvento} />
+                    <TextInput style={estilos.inputForm} placeholder="Ej. Cita médica" placeholderTextColor="#48d9d9" value={nombreEvento} onChangeText={setNombreEvento} />
                   </View>
                   <View style={estilos.grupoInputForm}>
                     <Text style={estilos.labelForm}>Fecha (YYYY-MM-DD) *</Text>

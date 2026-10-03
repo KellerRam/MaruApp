@@ -1,17 +1,19 @@
 import { Feather, MaterialIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import * as Clipboard from 'expo-clipboard';
 import { useEffect, useRef, useState } from 'react';
 import {
-    Alert,
-    FlatList,
-    Modal,
-    SafeAreaView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  Alert,
+  FlatList,
+  Modal,
+  Platform,
+  SafeAreaView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 
 import QRCode from 'react-native-qrcode-svg';
@@ -30,6 +32,10 @@ export default function PantallaGrupo() {
   const [generoPaciente, setGeneroPaciente] = useState('Otro');
   const [fechaNacimientoPaciente, setFechaNacimientoPaciente] = useState('');
   const [guardandoPaciente, setGuardandoPaciente] = useState(false);
+
+  // Estados para el selector de fecha (DateTimePicker)
+  const [mostrarCalendario, setMostrarCalendario] = useState(false);
+  const [fechaSeleccionada, setFechaSeleccionada] = useState(new Date());
 
   // Función reutilizable para cargar los miembros del grupo
   const cargarMiembros = async () => {
@@ -101,6 +107,18 @@ export default function PantallaGrupo() {
     ]);
   };
 
+  const onChangeFecha = (event, selectedDate) => {
+    const currentDate = selectedDate || fechaSeleccionada;
+    setMostrarCalendario(Platform.OS === 'ios');
+    if (selectedDate) {
+      setFechaSeleccionada(currentDate);
+      const anio = currentDate.getFullYear();
+      const mes = String(currentDate.getMonth() + 1).padStart(2, '0');
+      const dia = String(currentDate.getDate()).padStart(2, '0');
+      setFechaNacimientoPaciente(`${anio}-${mes}-${dia}`);
+    }
+  };
+
   const guardarPacienteManual = async () => {
     if (!nombrePaciente.trim() || !fechaNacimientoPaciente.trim()) {
       Alert.alert('Datos incompletos', 'Ingresa el nombre y la fecha de nacimiento del paciente.');
@@ -155,7 +173,7 @@ export default function PantallaGrupo() {
     Alert.alert('Enlace copiado', 'Puedes compartirlo con el nuevo miembro');
   };
 
-const actualizarRol = async (idUsuario, nuevoRol) => {
+  const actualizarRol = async (idUsuario, nuevoRol) => {
     if (!idGrupo) return;
     try {
       const respuesta = await fetch(`${API_URL}/api/groups/${idGrupo}/members/${idUsuario}/role`, {
@@ -334,6 +352,7 @@ const actualizarRol = async (idUsuario, nuevoRol) => {
             <TextInput
               style={estilos.entradaPaciente}
               placeholder="Nombre completo"
+              placeholderTextColor="#48d9d9"
               value={nombrePaciente}
               onChangeText={setNombrePaciente}
               maxLength={100}
@@ -341,13 +360,27 @@ const actualizarRol = async (idUsuario, nuevoRol) => {
             <TouchableOpacity style={estilos.opcionModal} onPress={seleccionarGeneroPaciente}>
               <Text style={estilos.textoOpcionModal}>Género: {generoPaciente}</Text>
             </TouchableOpacity>
-            <TextInput
-              style={estilos.entradaPaciente}
-              placeholder="Fecha de nacimiento (AAAA-MM-DD)"
-              value={fechaNacimientoPaciente}
-              onChangeText={setFechaNacimientoPaciente}
-              maxLength={10}
-            />
+
+            {/* Selector de fecha por calendario */}
+            <TouchableOpacity 
+              style={estilos.opcionModal} 
+              onPress={() => setMostrarCalendario(true)}
+            >
+              <Text style={estilos.textoOpcionModal}>
+                {fechaNacimientoPaciente ? `Fecha: ${fechaNacimientoPaciente}` : 'Seleccionar fecha de nacimiento'}
+              </Text>
+            </TouchableOpacity>
+
+            {mostrarCalendario && (
+              <DateTimePicker
+                value={fechaSeleccionada}
+                mode="date"
+                display="default"
+                maximumDate={new Date()}
+                onChange={onChangeFecha}
+              />
+            )}
+
             <TouchableOpacity
               style={estilos.opcionModal}
               onPress={guardarPacienteManual}
@@ -450,7 +483,7 @@ const estilos = StyleSheet.create({
   enlaceInvitacion: { color: '#666', fontSize: 12, textAlign: 'center', marginVertical: 14 },
   entradaPaciente: { alignSelf: 'stretch', borderWidth: 1, borderColor: '#CCCCCC', borderRadius: 10, padding: 12, marginBottom: 10 },
   nombreModal: { color: '#666', marginBottom: 14 },
-  opcionModal: { borderWidth: 1, borderColor: '#60A5A3', borderRadius: 10, padding: 12, marginBottom: 10, alignItems: 'center' },
+  opcionModal: { borderWidth: 1, borderColor: '#60A5A3', borderRadius: 10, padding: 12, marginBottom: 10, alignItems: 'center', alignSelf: 'stretch' },
   textoOpcionModal: { color: '#087A7A', fontSize: 15, fontWeight: '600' },
   cancelarModal: { padding: 10, alignItems: 'center' },
   textoCancelarModal: { color: '#666', fontSize: 14 },

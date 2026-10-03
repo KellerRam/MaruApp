@@ -222,7 +222,7 @@ const loginUsuario = async (req, res) => {
 
 const socialLoginUsuario = async (req, res) => {
   try {
-    const { provider, accessToken, identityToken, nombre, genero, fechaNacimiento } = req.body;
+    const { provider, accessToken, identityToken } = req.body;
     let perfil;
 
     if (provider === 'google' && accessToken) {
@@ -237,33 +237,58 @@ const socialLoginUsuario = async (req, res) => {
       }
     }
 
+    // (Opcional si manejas Apple ID con token de identidad en el backend o prefieres validarlo en el cliente)
+    if (provider === 'apple' && identityToken) {
+      // Si decodificas el identityToken de Apple o recibes el email verificado del cliente:
+      // perfil = { email: ..., nombre: ... };
+    }
+
     if (!perfil) {
       return res.status(401).json({ error: 'No se pudo verificar la identidad con el proveedor externo' });
     }
 
+    // 1. Revisar si el usuario ya existe en la base de datos
     let resultado = await pool.query('SELECT * FROM Usuario WHERE LOWER(correo) = $1', [perfil.email]);
-    let usuario;
-
+    
     if (resultado?.rows.length > 0) {
-      usuario = resultado.rows[0];
+      // El usuario ya existe, iniciamos sesión normalmente
+      const usuario = resultado.rows[0];
+      const grupoRes = await pool.query('SELECT id_grupo FROM Grupo_Usuario WHERE id_usuario = $1', [usuario.id_usuario]);
+      const tieneGrupo = grupoRes.rows.length > 0;
+      const token = jwt.sign({ id: usuario.id_usuario, email: usuario.correo }, process.env.JWT_SECRET, { expiresIn: '7d' });
+
+      return res.status(200).json({ 
+        nuevoUsuario: false, 
+        mensaje: 'Inicio de sesión exitoso', 
+        token, 
+        tieneGrupo, 
+        idUsuario: usuario.id_usuario 
+      });
     } else {
-      const passwordAleatoria = Math.random().toString(36).slice(-8) + Math.random().toString(36).slice(-8);
+      // 2. El usuario NO existe: lo guardamos temporalmente en 'verificacion_correo' 
+      // y le indicamos al frontend que debe pasar a completar sus datos (nombre, género, fecha de nacimiento).
+      const passwordAleatoria = crypto.randomBytes(16).toString('hex');
       const hashedPassword = await bcrypt.hash(passwordAleatoria, 10);
 
-      const nuevoUsuario = await pool.query(
-        `INSERT INTO Usuario (nombre_usuario, password_usuario, fecha_nacimiento_usuario, genero, correo)
-         VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-        [perfil.nombre || perfil.email.split('@')[0], hashedPassword, fechaNacimiento || '2000-01-01', genero || 'Otro', perfil.email]
+      await pool.query(
+        `INSERT INTO verificacion_correo (correo, codigo_hash, password_hash, expira_en, intentos, verificado_en, ultimo_envio)
+         VALUES ($1, 'SOCIAL_AUTH', $2, NOW() + INTERVAL '15 minutes', 0, NOW(), NOW())
+         ON CONFLICT (correo) DO UPDATE SET
+           password_hash = EXCLUDED.password_hash,
+           verificado_en = NOW(),
+           expira_en = NOW() + INTERVAL '15 minutes'`,
+        [perfil.email, hashedPassword]
       );
-      usuario = nuevoUsuario.rows[0];
+
+      return res.status(200).json({ 
+        nuevoUsuario: true, 
+        email: perfil.email,
+        nombreSugerido: perfil.nombre,
+        mensaje: 'Usuario nuevo detectado, completa tu perfil' 
+      });
     }
-
-    const grupoRes = await pool.query('SELECT id_grupo FROM Grupo_Usuario WHERE id_usuario = $1', [usuario.id_usuario]);
-    const tieneGrupo = grupoRes.rows.length > 0;
-    const token = jwt.sign({ id: usuario.id_usuario, email: usuario.correo }, process.env.JWT_SECRET, { expiresIn: '7d' });
-
-    res.status(200).json({ mensaje: 'Autenticación social exitosa', token, tieneGrupo, idUsuario: usuario.id_usuario });
   } catch (error) {
+    console.error('Error en socialLoginUsuario:', error.message);
     res.status(500).json({ error: error.message });
   }
 };

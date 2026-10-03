@@ -317,8 +317,8 @@ export default function PantallaInicio() {
           <View style={estilos.fondoModal}>
             <View style={estilos.modalSintoma}>
               <Text style={estilos.tituloModal}>Registrar síntoma</Text>
-              <TextInput style={estilos.inputSintoma} placeholder="Síntoma" value={nombreSintoma} onChangeText={setNombreSintoma} />
-              <TextInput style={[estilos.inputSintoma, estilos.inputDescripcion]} placeholder="Breve descripción" value={descripcionSintoma} onChangeText={setDescripcionSintoma} multiline />
+              <TextInput style={estilos.inputSintoma} placeholder="Síntoma" placeholderTextColor="#48d9d9" value={nombreSintoma} onChangeText={setNombreSintoma} />
+              <TextInput style={[estilos.inputSintoma, estilos.inputDescripcion]} placeholder="Breve descripción" placeholderTextColor="#48d9d9" value={descripcionSintoma} onChangeText={setDescripcionSintoma} multiline />
               <FormPickerInput
                 pickerType="date"
                 modalTitle="Fecha del síntoma"
@@ -366,7 +366,7 @@ export default function PantallaInicio() {
               <TextInput
                 style={estilos.inputAnimo}
                 placeholder="Agregar síntoma..."
-                placeholderTextColor="#999"
+                placeholderTextColor="#48d9d9"
                 value={textoAnimo}
                 onChangeText={setTextoAnimo}
                 multiline

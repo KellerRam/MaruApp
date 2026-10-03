@@ -3,14 +3,14 @@ import { Feather } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useEffect, useState } from 'react';
 import {
-  FlatList,
-  Modal,
-  Platform,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    FlatList,
+    Modal,
+    Platform,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from 'react-native';
 
 export default function FormPickerInput({
@@ -137,7 +137,7 @@ export default function FormPickerInput({
           style={styles.textoInputOculto}
           value={value}
           placeholder={placeholder}
-          placeholderTextColor="#999"
+          placeholderTextColor="#48d9d9"
           editable={false}
           pointerEvents="none"
         />
@@ -422,7 +422,7 @@ const styles = StyleSheet.create({
   },
 
   placeholder: {
-    color: '#999',
+    color: '#48d9d9',
   },
 
   // =========================

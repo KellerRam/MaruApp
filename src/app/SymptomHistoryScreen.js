@@ -245,8 +245,8 @@ export default function SymptomHistoryScreen() {
         <View style={estilos.fondoModal}>
           <View style={estilos.modalContenido}>
             <Text style={estilos.tituloModal}>Editar Síntoma</Text>
-            <TextInput style={estilos.input} placeholder="Síntoma" value={nombreEdit} onChangeText={setNombreEdit} />
-            <TextInput style={[estilos.input, estilos.inputDesc]} placeholder="Descripción" value={descEdit} onChangeText={setDescEdit} multiline />
+            <TextInput style={estilos.input} placeholder="Síntoma" placeholderTextColor="#48d9d9" value={nombreEdit} onChangeText={setNombreEdit} />
+            <TextInput style={[estilos.input, estilos.inputDesc]} placeholder="Descripción" placeholderTextColor="#48d9d9" value={descEdit} onChangeText={setDescEdit} multiline />
             
             <FormPickerInput
               pickerType="date"

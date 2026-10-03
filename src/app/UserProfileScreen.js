@@ -297,6 +297,7 @@ export default function UserProfileScreen() {
             <TextInput
               style={estilos.inputPasswordEliminar}
               placeholder="Contraseña"
+              placeholderTextColor="#48d9d9"
               secureTextEntry
               value={passwordEliminar}
               onChangeText={setPasswordEliminar}

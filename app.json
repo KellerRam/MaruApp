@@ -12,9 +12,15 @@
       "bundleIdentifier": "com.maruapp",
       "usesAppleSignIn": true,
       "icon": "./assets/images/icon.png",
+      "entitlements": {
+        "com.apple.developer.applesignin": [
+          "Default"
+        ]
+      },
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
-      }
+      },
+      "buildNumber": "2"
     },
     "android": {
       "adaptiveIcon": {

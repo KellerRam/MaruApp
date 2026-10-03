@@ -176,7 +176,7 @@ export default function GroupSelectionScreen() {
             <TextInput
               style={estilos.input}
               placeholder="Ej. Familia Martínez"
-              placeholderTextColor="#999"
+              placeholderTextColor="#48d9d9"
               value={nombreGrupo}
               onChangeText={setNombreGrupo}
               autoFocus

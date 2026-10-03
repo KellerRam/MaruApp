@@ -17,7 +17,7 @@ WebBrowser.maybeCompleteAuthSession();
 const GOOGLE_CLIENT_ID = '459535616553-cvqcic2b2fl4s28em8rvmtt10gp35rn0.apps.googleusercontent.com';
 const EXPO_OWNER = Constants.expoConfig?.owner || 'kungpao23';
 const EXPO_SLUG = Constants.expoConfig?.slug || 'appMaru';
-const GOOGLE_REDIRECT_URI = `https://auth.expo.io/@${EXPO_OWNER}/${EXPO_SLUG}`;
+const GOOGLE_REDIRECT_URI = `https://auth.expo.io/@kungpao23/appMaru`;
 
 export default function LoginScreen() {
   const router = useRouter();
@@ -35,7 +35,7 @@ export default function LoginScreen() {
     }
   };
 
-  const iniciarSesionSocial = async (perfil) => {
+const iniciarSesionSocial = async (perfil) => {
     const respuesta = await fetch(`${API_URL}/api/auth/social-login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -47,7 +47,17 @@ export default function LoginScreen() {
       throw new Error(datos.error || 'No se pudo iniciar sesión');
     }
 
-    await completarInicioSesion(datos);
+    if (datos.nuevoUsuario) {
+      // Si es nuevo, lo mandamos al flujo de completar perfil pasando su correo
+      // Puedes pasar el correo por parámetros de ruta o guardarlo temporalmente
+      router.push({
+        pathname: '/signup',
+        params: { emailPrellenado: datos.email, nombrePrellenado: datos.nombreSugerido }
+      });
+    } else {
+      // Si ya existía, completa el inicio de sesión normal
+      await completarInicioSesion(datos);
+    }
     return datos;
   };
 

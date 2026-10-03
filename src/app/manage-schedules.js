@@ -154,9 +154,9 @@ export default function ManageOperationsScreen() {
           
           {tipoEntidad === 'medicamento' && (
             <>
-              <TextInput style={estilos.input} placeholder="Nombre del medicamento" value={nombreMed} onChangeText={setNombreMed} />
-              <TextInput style={estilos.input} placeholder="Dosis (Ej. 500mg)" value={dosis} onChangeText={setDosis} />
-              <TextInput style={estilos.input} placeholder="Presentación (Ej. Pastillas)" value={presentacion} onChangeText={setPresentacion} />
+              <TextInput style={estilos.input} placeholder="Nombre del medicamento" placeholderTextColor="#48d9d9" value={nombreMed} onChangeText={setNombreMed} />
+              <TextInput style={estilos.input} placeholder="Dosis (Ej. 500mg)" placeholderTextColor="#48d9d9" value={dosis} onChangeText={setDosis} />
+              <TextInput style={estilos.input} placeholder="Presentación (Ej. Pastillas)" placeholderTextColor="#48d9d9" value={presentacion} onChangeText={setPresentacion} />
             </>
           )}
 
@@ -174,6 +174,7 @@ export default function ManageOperationsScreen() {
                 modalTitle="Hora de inicio"
                 style={estilos.input}
                 placeholder="Hora inicio (HH:MM)"
+                placeholderTextColor="#48d9d9"
                 value={horaInicioCuidado}
                 onChangeText={setHoraInicioCuidado}
                 minTime={tipoAccion === 'agregar' ? horaActualStr : null}
@@ -183,6 +184,7 @@ export default function ManageOperationsScreen() {
                 modalTitle="Hora de fin"
                 style={estilos.input}
                 placeholder="Hora fin (HH:MM)"
+                placeholderTextColor="#48d9d9"
                 value={horaFinCuidado}
                 onChangeText={setHoraFinCuidado}
               />
@@ -191,12 +193,13 @@ export default function ManageOperationsScreen() {
 
           {tipoEntidad === 'evento' && (
             <>
-              <TextInput style={estilos.input} placeholder="Nombre del evento" value={nombreEvento} onChangeText={setNombreEvento} />
+              <TextInput style={estilos.input} placeholder="Nombre del evento" placeholderTextColor="#48d9d9" value={nombreEvento} onChangeText={setNombreEvento} />
               <FormPickerInput
                 pickerType="time"
                 modalTitle="Hora del evento"
                 style={estilos.input}
                 placeholder="Hora (HH:MM)"
+                placeholderTextColor="#48d9d9"
                 value={horaEvento}
                 onChangeText={setHoraEvento}
               />
@@ -205,6 +208,7 @@ export default function ManageOperationsScreen() {
                 modalTitle="Fecha del evento"
                 style={estilos.input}
                 placeholder="Fecha (YYYY-MM-DD)"
+                placeholderTextColor="#48d9d9"
                 value={fechaEvento}
                 onChangeText={setFechaEvento}
                 minDate={tipoAccion === 'agregar' ? fechaHoyISO : null}

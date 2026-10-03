@@ -135,7 +135,7 @@ export default function JoinGroupScreen() {
         <TextInput
           style={estilos.input}
           placeholder="Pega aquí el enlace o token..."
-          placeholderTextColor="#999"
+          placeholderTextColor="#48d9d9"
           value={tokenInput}
           onChangeText={setTokenInput}
           multiline

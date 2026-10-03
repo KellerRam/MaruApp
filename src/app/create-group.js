@@ -88,7 +88,7 @@ export default function CreateGroupScreen() {
         <TextInput
           style={estilos.input}
           placeholder="Ej. Familia Pérez"
-          placeholderTextColor="#999"
+          placeholderTextColor="#48d9d9"
           value={nombreGrupo}
           onChangeText={setNombreGrupo}
         />

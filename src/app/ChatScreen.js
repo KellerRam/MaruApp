@@ -1,3 +1,4 @@
+// src/app/chat.js (o tu ruta correspondiente de PantallaChat)
 import { Feather } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AudioModule, RecordingPresets, createAudioPlayer, setAudioModeAsync, useAudioRecorder } from 'expo-audio';
@@ -48,6 +49,7 @@ export default function PantallaChat() {
           if (!activo || solicitudEnCurso) return;
           solicitudEnCurso = true;
           try {
+            // CORREGIDO: Ruta exacta alineada con chatRoutes.js
             const respuesta = await fetch(`${API_URL}/api/chat/group/${grupo}/messages`);
             if (!respuesta.ok) throw new Error('No se pudieron cargar los mensajes');
             const datos = await respuesta.json();
@@ -84,81 +86,86 @@ export default function PantallaChat() {
     setMensajes((prev) => [...prev, { ...mensaje, remitente: 'Tú', es_mio: true }]);
   };
 
-const enviarArchivo = async (archivo, tipo) => {
-  if (!idGrupo || !idUsuario || !archivo?.uri || enviando) return;
+  const enviarArchivo = async (archivo, tipo) => {
+    if (!idGrupo || !idUsuario || !archivo?.uri || enviando) return;
 
-  setEnviando(true);
+    setEnviando(true);
 
-  try {
-    const nombre =
-      archivo.name ||
-      archivo.fileName ||
-      `archivo-${Date.now()}`;
-
-    const mimeType =
-      archivo.mimeType ||
-      archivo.type ||
-      (tipo === 'imagen'
-        ? 'image/jpeg'
-        : tipo === 'audio'
-          ? 'audio/m4a'
-          : 'application/octet-stream');
-
-    const url = `${API_URL}/api/chat/group/${idGrupo}/messages`;
-    let respuesta;
-    let textoRespuesta;
-
-    if (Platform.OS === 'web') {
-      const formulario = new FormData();
-      formulario.append('tipo', tipo);
-      if (archivo.file) {
-        formulario.append('archivo', archivo.file, nombre);
-      } else {
-        const respuestaLocal = await fetch(archivo.uri);
-        formulario.append('archivo', await respuestaLocal.blob(), nombre);
-      }
-      respuesta = await fetch(url, { method: 'POST', body: formulario });
-      textoRespuesta = await respuesta.text();
-    } else {
-      const token = await AsyncStorage.getItem('userToken');
-      respuesta = await FileSystem.uploadAsync(url, archivo.uri, {
-        fieldName: 'archivo',
-        httpMethod: 'POST',
-        uploadType: FileSystem.FileSystemUploadType.MULTIPART,
-        mimeType,
-        parameters: { tipo },
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      });
-      textoRespuesta = respuesta.body;
-    }
-
-    let datos;
     try {
-      datos = JSON.parse(textoRespuesta);
-    } catch {
-      throw new Error(`Respuesta inválida del servidor: ${textoRespuesta}`);
+      const nombre =
+        archivo.name ||
+        archivo.fileName ||
+        `archivo-${Date.now()}`;
+
+      const mimeType =
+        archivo.mimeType ||
+        archivo.type ||
+        (tipo === 'imagen'
+          ? 'image/jpeg'
+          : tipo === 'audio'
+            ? 'audio/m4a'
+            : 'application/octet-stream');
+
+      // CORREGIDO: Ruta exacta alineada con chatRoutes.js
+      const url = `${API_URL}/api/chat/group/${idGrupo}/messages`;
+      let respuesta;
+      let textoRespuesta;
+
+      if (Platform.OS === 'web') {
+        const formulario = new FormData();
+        formulario.append('tipo', tipo);
+        if (archivo.file) {
+          formulario.append('archivo', archivo.file, nombre);
+        } else {
+          const respuestaLocal = await fetch(archivo.uri);
+          formulario.append('archivo', await respuestaLocal.blob(), nombre);
+        }
+        respuesta = await fetch(url, { method: 'POST', body: formulario });
+        textoRespuesta = await respuesta.text();
+      } else {
+        const token = await AsyncStorage.getItem('userToken');
+        respuesta = await FileSystem.uploadAsync(url, archivo.uri, {
+          fieldName: 'archivo',
+          httpMethod: 'POST',
+          uploadType: FileSystem.FileSystemUploadType.MULTIPART,
+          mimeType,
+          parameters: { tipo },
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
+        textoRespuesta = respuesta.body;
+      }
+
+      let datos;
+      try {
+        datos = JSON.parse(textoRespuesta);
+      } catch {
+        throw new Error(`Respuesta inválida del servidor: ${textoRespuesta}`);
+      }
+
+      if (respuesta.status < 200 || respuesta.status >= 300) {
+        throw new Error(datos.error || 'No se pudo enviar el archivo');
+      }
+
+      agregarMensajeLocal(datos.mensaje);
+    } catch (error) {
+      console.error('Error enviando archivo:', error);
+      Alert.alert('No se pudo enviar', error.message);
+    } finally {
+      setEnviando(false);
     }
-
-    if (respuesta.status < 200 || respuesta.status >= 300) {
-      throw new Error(datos.error || 'No se pudo enviar el archivo');
-    }
-
-    agregarMensajeLocal(datos.mensaje);
-  } catch (error) {
-    console.error('Error enviando archivo:', error);
-    Alert.alert('No se pudo enviar', error.message);
-  } finally {
-    setEnviando(false);
-  }
-};
-
+  };
 
   const enviarTexto = async () => {
     const texto = mensajeTexto.trim();
     if (!texto || !idGrupo || !idUsuario || enviando) return;
     setEnviando(true);
     try {
-      const respuesta = await fetch(`${API_URL}/api/chat/group/${idGrupo}/messages`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ idUsuario, tipo: 'texto', texto }) });
+      // CORREGIDO: Ruta exacta alineada con chatRoutes.js
+      const respuesta = await fetch(`${API_URL}/api/chat/group/${idGrupo}/messages`, { 
+        method: 'POST', 
+        headers: { 'Content-Type': 'application/json' }, 
+        body: JSON.stringify({ tipo: 'texto', texto }) 
+      });
       const datos = await respuesta.json();
       if (!respuesta.ok) throw new Error(datos.error || 'No se pudo enviar el mensaje');
       setMensajeTexto('');
@@ -194,7 +201,7 @@ const enviarArchivo = async (archivo, tipo) => {
     if (!resultado.canceled && resultado.assets?.[0]) await enviarArchivo(resultado.assets[0], 'documento');
   };
 
-const descargarArchivoDispositivo = async (item) => {
+  const descargarArchivoDispositivo = async (item) => {
     try {
       const url = urlArchivo(item.archivo_url);
       const nombreArchivo = item.archivo_nombre || `archivo_${Date.now()}`;
@@ -364,14 +371,14 @@ const descargarArchivoDispositivo = async (item) => {
     <SafeAreaView style={estilos.contenedorPrincipal}>
       <KeyboardAvoidingView style={estilos.contenedorTeclado} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <View style={estilos.encabezado}>
-          <View style={estilos.barraBusqueda}><Feather name="search" size={20} color="#333" style={estilos.iconoBusqueda} /><TextInput style={estilos.inputBusqueda} placeholder="Buscar..." value={textoBusqueda} onChangeText={setTextoBusqueda} /></View>
+          <View style={estilos.barraBusqueda}><Feather name="search" size={20} color="#333" style={estilos.iconoBusqueda} /><TextInput style={estilos.inputBusqueda} placeholder="Buscar..." placeholderTextColor="#48d9d9" value={textoBusqueda} onChangeText={setTextoBusqueda} /></View>
           <TouchableOpacity style={estilos.botonCerrar} onPress={() => router.push('/(tabs)')}><Feather name="x" size={24} color="#555" /></TouchableOpacity>
         </View>
         <FlatList data={mensajesVisibles} keyExtractor={(item) => String(item.id_mensaje)} renderItem={renderizarMensaje} style={estilos.listaContenedor} contentContainerStyle={estilos.listaContenidoInterior} showsVerticalScrollIndicator={false} />
         {estadoAudio === 'inactivo' ? (
           <View style={estilos.pieDePagina}>
             <TouchableOpacity style={estilos.botonIconoBlanco} onPress={abrirAdjuntos} disabled={enviando}><Feather name="paperclip" size={20} color="#777" /></TouchableOpacity>
-            <TextInput style={estilos.inputMensaje} value={mensajeTexto} onChangeText={setMensajeTexto} placeholder="Escribe un mensaje..." placeholderTextColor="#DDD" editable={!enviando} />
+            <TextInput style={estilos.inputMensaje} value={mensajeTexto} onChangeText={setMensajeTexto} placeholder="Escribe un mensaje..." placeholderTextColor="#48d9d9" editable={!enviando} />
             {mensajeTexto.trim().length > 0 ? <TouchableOpacity style={[estilos.botonIconoBlanco, estilos.botonEnviar]} onPress={enviarTexto} disabled={enviando}><Feather name="send" size={18} color="#FFF" /></TouchableOpacity> : <><TouchableOpacity style={estilos.botonIconoBlanco} onPressIn={comenzarAudio} disabled={enviando}><Feather name="mic" size={18} color="#777" /></TouchableOpacity><TouchableOpacity style={estilos.botonIconoBlanco} onPress={tomarFoto} disabled={enviando}><Feather name="camera" size={18} color="#777" /></TouchableOpacity></>}
           </View>
         ) : (
