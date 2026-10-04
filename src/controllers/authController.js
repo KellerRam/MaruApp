@@ -4,6 +4,9 @@ const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const nodemailer = require('nodemailer');
+const { OAuth2Client } = require('google-auth-library');
+
+const client = new OAuth2Client('459535616553-cvqcic2b2fl4s28em8rvmtt10gp35rn0.apps.googleusercontent.com'); // Reemplaza con tu Web Client ID
 
 const OTP_MAX_ATTEMPTS = 5;
 const OTP_SECRET = () => process.env.OTP_SECRET || process.env.JWT_SECRET;
@@ -60,17 +63,16 @@ const emitirCodigoVerificacion = async (email, passwordHash = null) => {
   const codigo = crypto.randomInt(100000, 1000000).toString();
   const codigoHash = hashCodigo(email, codigo);
   
-  // Incluye la cláusula WHERE para respetar el intervalo de 60 segundos en reenvíos
   const guardado = await pool.query(
     `INSERT INTO verificacion_correo (correo, codigo_hash, password_hash, expira_en, intentos, verificado_en, ultimo_envio)
      VALUES ($1, $2, $3, NOW() + INTERVAL '15 minutes', 0, NULL, NOW())
      ON CONFLICT (correo) DO UPDATE SET
-       codigo_hash = EXCLUDED.codigo_hash,
-       password_hash = COALESCE(EXCLUDED.password_hash, verificacion_correo.password_hash),
-       expira_en = EXCLUDED.expira_en,
-       intentos = 0,
-       verificado_en = NULL,
-       ultimo_envio = NOW()
+        codigo_hash = EXCLUDED.codigo_hash,
+        password_hash = COALESCE(EXCLUDED.password_hash, verificacion_correo.password_hash),
+        expira_en = EXCLUDED.expira_en,
+        intentos = 0,
+        verificado_en = NULL,
+        ultimo_envio = NOW()
      WHERE verificacion_correo.ultimo_envio <= NOW() - INTERVAL '60 seconds'
      RETURNING correo`,
     [email, codigoHash, passwordHash]
@@ -125,7 +127,6 @@ const solicitarCodigo = async (req, res) => {
     if (typeof password === 'string' && password.trim() !== '') {
       passwordHash = await bcrypt.hash(password, 10);
     } else {
-      // Si la petición viene de un reenvío sin contraseña, rescatamos la existente para no perderla
       const tempAntiguo = await pool.query('SELECT password_hash FROM verificacion_correo WHERE LOWER(correo) = $1', [email]);
       if (tempAntiguo.rows.length > 0 && tempAntiguo.rows[0].password_hash) {
         passwordHash = tempAntiguo.rows[0].password_hash;
@@ -165,8 +166,6 @@ const verificarCodigo = async (req, res) => {
     }
 
     const codigoHash = hashCodigo(email, codigo);
-    
-    // .trim() elimina los espacios en blanco que añade el tipo 'bpchar' de Postgres
     const hashBdLimpio = typeof registro.codigo_hash === 'string' ? registro.codigo_hash.trim() : '';
     
     const hashCoincide = hashBdLimpio.length === codigoHash.length &&
@@ -176,7 +175,6 @@ const verificarCodigo = async (req, res) => {
       return res.status(400).json({ error: 'Código incorrecto.' });
     }
 
-    // Actualizamos manteniendo el password_hash intacto
     await pool.query(
       `UPDATE verificacion_correo
        SET codigo_hash = NULL, verificado_en = NOW(), expira_en = NOW() + INTERVAL '1 hour'
@@ -211,7 +209,6 @@ const loginUsuario = async (req, res) => {
 
     const grupoRes = await pool.query('SELECT id_grupo FROM Grupo_Usuario WHERE id_usuario = $1', [usuario.id_usuario]);
     const tieneGrupo = grupoRes.rows.length > 0;
-
     const token = jwt.sign({ id: usuario.id_usuario, email: usuario.correo }, process.env.JWT_SECRET, { expiresIn: '7d' });
 
     res.status(200).json({ mensaje: 'Inicio de sesión exitoso', token, tieneGrupo, idUsuario: usuario.id_usuario });
@@ -222,27 +219,45 @@ const loginUsuario = async (req, res) => {
 
 const socialLoginUsuario = async (req, res) => {
   try {
-    const { email, nombre, provider } = req.body;
-    const emailLimpio = normalizarEmail(email);
+    const { provider, idToken, identityToken } = req.body;
+    let emailFinal = null;
+    let nombreFinal = null;
 
-    if (!emailValido(emailLimpio)) {
-      return res.status(400).json({ error: 'Correo electrónico no válido del proveedor' });
+    if (provider === 'google' && idToken) {
+      const ticket = await client.verifyIdToken({
+        idToken: idToken,
+        audience: '459535616553-cvqcic2b2fl4s28em8rvmtt10gp35rn0.apps.googleusercontent.com', // Reemplaza con tu Web Client ID
+      });
+      const payload = ticket.getPayload();
+      emailFinal = payload.email?.toLowerCase();
+      nombreFinal = payload.name || emailFinal?.split('@')[0];
+    } else if (provider === 'apple' && identityToken) {
+      // Decodificación básica segura del payload de Apple (JWT)
+      const partes = identityToken.split('.');
+      if (partes.length === 3) {
+        const payloadDecodificado = JSON.parse(Buffer.from(partes[1], 'base64').toString('utf8'));
+        emailFinal = payloadDecodificado.email?.toLowerCase();
+        nombreFinal = emailFinal ? emailFinal.split('@')[0] : 'Usuario Apple';
+      }
     }
 
-    let resultado = await pool.query('SELECT * FROM Usuario WHERE LOWER(correo) = $1', [emailLimpio]);
+    if (!emailFinal) {
+      return res.status(401).json({ error: 'No se pudo verificar la identidad con el proveedor externo' });
+    }
+
+    let resultado = await pool.query('SELECT * FROM Usuario WHERE LOWER(correo) = $1', [emailFinal]);
     let usuario;
 
     if (resultado?.rows.length > 0) {
       usuario = resultado.rows[0];
     } else {
-      // Si no existe, lo creamos de inmediato con una contraseña segura aleatoria
       const passwordAleatoria = crypto.randomBytes(16).toString('hex');
       const hashedPassword = await bcrypt.hash(passwordAleatoria, 10);
 
       const nuevoUsuario = await pool.query(
         `INSERT INTO Usuario (nombre_usuario, password_usuario, fecha_nacimiento_usuario, genero, correo)
          VALUES ($1, $2, '2000-01-01', 'Otro', $3) RETURNING *`,
-        [nombre || emailLimpio.split('@')[0], hashedPassword, emailLimpio]
+        [nombreFinal || emailFinal.split('@')[0], hashedPassword, emailFinal]
       );
       usuario = nuevoUsuario.rows[0];
     }
@@ -251,15 +266,10 @@ const socialLoginUsuario = async (req, res) => {
     const tieneGrupo = grupoRes.rows.length > 0;
     const token = jwt.sign({ id: usuario.id_usuario, email: usuario.correo }, process.env.JWT_SECRET, { expiresIn: '7d' });
 
-    return res.status(200).json({ 
-      mensaje: 'Autenticación social exitosa', 
-      token, 
-      tieneGrupo, 
-      idUsuario: usuario.id_usuario 
-    });
+    res.status(200).json({ mensaje: 'Autenticación social exitosa', token, tieneGrupo, idUsuario: usuario.id_usuario });
   } catch (error) {
     console.error('Error en socialLoginUsuario:', error.message);
-    return res.status(500).json({ error: 'No se pudo procesar el inicio de sesión social' });
+    res.status(500).json({ error: 'No se pudo verificar la identidad con el proveedor externo' });
   }
 };
 

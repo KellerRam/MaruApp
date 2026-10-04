@@ -45,6 +45,12 @@
       "expo-router",
       "expo-apple-authentication",
       [
+        "@react-native-google-signin/google-signin",
+        {
+          "iosUrlScheme": "com.googleusercontent.apps.459535616553-icgsebe4e8incmoj3q1na1mr6josf98e"
+        }
+      ],
+      [
         "expo-image-picker",
         {
           "photosPermission": "Maru necesita acceso para adjuntar el comprobante del movimiento."

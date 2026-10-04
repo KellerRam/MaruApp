@@ -1,12 +1,19 @@
 // src/app/login.js
 import { AntDesign, Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { GoogleSignin } from '@react-native-google-signin/google-signin';
 import * as AppleAuthentication from 'expo-apple-authentication';
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import { Alert, Image, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { API_URL } from '../config/api';
 import { apiFetch as fetch } from '../config/apiFetch';
+
+// Configuración inicial del SDK de Google Sign-In
+GoogleSignin.configure({
+  webClientId: '459535616553-cvqcic2b2fl4s28em8rvmtt10gp35rn0.apps.googleusercontent.com ', // Reemplaza con tu Web Client ID de Google Cloud
+  iosClientId: '459535616553-icgsebe4e8incmoj3q1na1mr6josf98e.apps.googleusercontent.com', // (Opcional si usas el plugin nativo, pero recomendado)
+});
 
 export default function LoginScreen() {
   const router = useRouter();
@@ -43,33 +50,27 @@ export default function LoginScreen() {
     }
   };
 
-  // Botón Google adaptado para pedir el correo de forma limpia y directa sin romper TestFlight
-  const manejarLoginGoogle = () => {
-    Alert.prompt(
-      'Continuar con Google',
-      'Ingresa tu correo asociado a Google:',
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Continuar',
-          onPress: (correoInput) => {
-            if (!correoInput || !correoInput.includes('@')) {
-              alert('Correo inválido');
-              return;
-            }
-            enviarLoginSocialAlBackend({
-              provider: 'google',
-              email: correoInput.toLowerCase().trim(),
-              nombre: correoInput.split('@')[0]
-            });
-          }
-        }
-      ],
-      'plain-text'
-    );
+  // Inicio de sesión estándar y nativo con Google
+  const manejarLoginGoogle = async () => {
+    try {
+      await GoogleSignin.hasPlayServices();
+      const response = await GoogleSignin.signIn();
+      const idToken = response.data?.idToken || response.idToken;
+
+      if (!idToken) throw new Error('Google no devolvió un token de identidad válido.');
+
+      await enviarLoginSocialAlBackend({
+        provider: 'google',
+        idToken
+      });
+    } catch (error) {
+      if (error.code !== 'SIGN_IN_CANCELLED') {
+        Alert.alert('Error de Google', error.message || 'No se pudo iniciar sesión con Google.');
+      }
+    }
   };
 
-  // Botón Apple ID usando directamente el SDK nativo de Apple
+  // Inicio de sesión estándar y nativo con Apple ID
   const manejarLoginApple = async () => {
     if (Platform.OS !== 'ios') {
       alert('El inicio de sesión con Apple solo está disponible en iOS.');
@@ -84,13 +85,11 @@ export default function LoginScreen() {
         ]
       });
 
-      const emailApple = credencial.email || `${credencial.user}@privateray.appleid.com`;
-      const nombreApple = AppleAuthentication.formatFullName(credencial.fullName)?.trim() || 'Usuario Apple';
+      if (!credencial.identityToken) throw new Error('Apple no devolvió un token de identidad.');
 
       await enviarLoginSocialAlBackend({
         provider: 'apple',
-        email: emailApple,
-        nombre: nombreApple
+        identityToken: credencial.identityToken
       });
     } catch (error) {
       if (error.code !== 'ERR_REQUEST_CANCELED') {
