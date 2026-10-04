@@ -5,7 +5,11 @@ const fechaISOValida = (fecha) => typeof fecha === 'string'
   && !Number.isNaN(Date.parse(`${fecha}T00:00:00.000Z`))
   && new Date(`${fecha}T00:00:00.000Z`).toISOString().slice(0, 10) === fecha;
 
-const hora24Valida = (hora) => typeof hora === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(hora);
+const hora24Valida = (hora) => {
+  if (typeof hora !== 'string') return false;
+  // Permite tanto HH:MM como HH:MM:SS
+  return /^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/.test(hora);
+};
 
 const crearSintoma = async (req, res) => {
   try {
@@ -91,7 +95,6 @@ const obtenerSintomas = async (req, res) => {
   }
 };
 
-// Actualizar síntoma
 const actualizarSintoma = async (req, res) => {
   try {
     const { idSintoma } = req.params;
@@ -101,21 +104,24 @@ const actualizarSintoma = async (req, res) => {
       return res.status(400).json({ error: 'Todos los campos son obligatorios y deben ser válidos' });
     }
 
+    const horaLimpia = hora_sintoma.length === 5 ? `${hora_sintoma}:00` : hora_sintoma;
+
     const resultado = await pool.query(
       `UPDATE sintoma 
        SET nombre_sintoma = $1, descripcion = $2, fecha_sintoma = $3, hora_sintoma = $4 
        WHERE id_sintoma = $5 
        RETURNING id_sintoma, id_usuario, nombre_sintoma, descripcion, fecha_sintoma, hora_sintoma`,
-      [nombre_sintoma.trim(), descripcion.trim(), fecha_sintoma, `${hora_sintoma}:00`, idSintoma]
+      [nombre_sintoma.trim(), descripcion.trim(), fecha_sintoma, horaLimpia, idSintoma]
     );
 
     if (resultado.rows.length === 0) {
       return res.status(404).json({ error: 'Síntoma no encontrado' });
     }
 
-    res.status(200).json({ sintoma: resultado.rows[0] });
+    return res.status(200).json({ sintoma: resultado.rows[0] });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error('Error en actualizarSintoma:', error.message);
+    return res.status(500).json({ error: error.message });
   }
 };
 
