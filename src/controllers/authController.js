@@ -268,8 +268,8 @@ const socialLoginUsuario = async (req, res) => {
 
     res.status(200).json({ mensaje: 'Autenticación social exitosa', token, tieneGrupo, idUsuario: usuario.id_usuario });
   } catch (error) {
-    console.error('Error en socialLoginUsuario:', error.message);
-    res.status(500).json({ error: 'No se pudo verificar la identidad con el proveedor externo' });
+    console.error('ERROR REAL DE GOOGLE:', error.message); // <--- Cambia esto temporalmente
+    return res.status(401).json({ error: `Fallo de verificación: ${error.message}` });
   }
 };
 
