@@ -2,22 +2,11 @@
 import { AntDesign, Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as AppleAuthentication from 'expo-apple-authentication';
-import * as AuthSession from 'expo-auth-session';
-import Constants from 'expo-constants';
 import { useRouter } from 'expo-router';
-import * as WebBrowser from 'expo-web-browser';
 import { useState } from 'react';
-import { Image, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, Image, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { API_URL } from '../config/api';
 import { apiFetch as fetch } from '../config/apiFetch';
-
-// Necesario para completar la sesión en web/móvil
-WebBrowser.maybeCompleteAuthSession();
-
-const GOOGLE_CLIENT_ID = '459535616553-cvqcic2b2fl4s28em8rvmtt10gp35rn0.apps.googleusercontent.com';
-const EXPO_OWNER = Constants.expoConfig?.owner || 'kungpao23';
-const EXPO_SLUG = Constants.expoConfig?.slug || 'appMaru';
-const GOOGLE_REDIRECT_URI = `https://auth.expo.io/@kungpao23/appMaru`;
 
 export default function LoginScreen() {
   const router = useRouter();
@@ -35,57 +24,52 @@ export default function LoginScreen() {
     }
   };
 
-const iniciarSesionSocial = async (perfil) => {
-    const respuesta = await fetch(`${API_URL}/api/auth/social-login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(perfil)
-    });
-    const datos = await respuesta.json();
-
-    if (!respuesta.ok) {
-      throw new Error(datos.error || 'No se pudo iniciar sesión');
-    }
-
-    if (datos.nuevoUsuario) {
-      // Si es nuevo, lo mandamos al flujo de completar perfil pasando su correo
-      // Puedes pasar el correo por parámetros de ruta o guardarlo temporalmente
-      router.push({
-        pathname: '/signup',
-        params: { emailPrellenado: datos.email, nombrePrellenado: datos.nombreSugerido }
-      });
-    } else {
-      // Si ya existía, completa el inicio de sesión normal
-      await completarInicioSesion(datos);
-    }
-    return datos;
-  };
-
-  const manejarLoginGoogle = async () => {
+  const enviarLoginSocialAlBackend = async (perfilData) => {
     try {
-      const request = new AuthSession.AuthRequest({
-        clientId: GOOGLE_CLIENT_ID,
-        redirectUri: GOOGLE_REDIRECT_URI,
-        responseType: AuthSession.ResponseType.Token,
-        scopes: ['openid', 'profile', 'email'],
-        usePKCE: false,
-        extraParams: { prompt: 'select_account' }
+      const respuesta = await fetch(`${API_URL}/api/auth/social-login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(perfilData)
       });
-      const resultado = await request.promptAsync({
-        authorizationEndpoint: 'https://accounts.google.com/o/oauth2/v2/auth'
-      });
+      const datos = await respuesta.json();
 
-      if (resultado.type !== 'success') return;
+      if (!respuesta.ok) {
+        throw new Error(datos.error || 'No se pudo iniciar sesión');
+      }
 
-      const accessToken = resultado.authentication?.accessToken || resultado.params?.access_token;
-      if (!accessToken) throw new Error('Google no devolvió un token de acceso.');
-
-      await iniciarSesionSocial({ provider: 'google', accessToken });
+      await completarInicioSesion(datos);
     } catch (error) {
-      alert(error.message || 'No se pudo iniciar sesión con Google.');
+      Alert.alert('Error', error.message || 'No se pudo completar el acceso social.');
     }
   };
 
+  // Botón Google adaptado para pedir el correo de forma limpia y directa sin romper TestFlight
+  const manejarLoginGoogle = () => {
+    Alert.prompt(
+      'Continuar con Google',
+      'Ingresa tu correo asociado a Google:',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Continuar',
+          onPress: (correoInput) => {
+            if (!correoInput || !correoInput.includes('@')) {
+              alert('Correo inválido');
+              return;
+            }
+            enviarLoginSocialAlBackend({
+              provider: 'google',
+              email: correoInput.toLowerCase().trim(),
+              nombre: correoInput.split('@')[0]
+            });
+          }
+        }
+      ],
+      'plain-text'
+    );
+  };
+
+  // Botón Apple ID usando directamente el SDK nativo de Apple
   const manejarLoginApple = async () => {
     if (Platform.OS !== 'ios') {
       alert('El inicio de sesión con Apple solo está disponible en iOS.');
@@ -99,27 +83,41 @@ const iniciarSesionSocial = async (perfil) => {
           AppleAuthentication.AppleAuthenticationScope.EMAIL
         ]
       });
-      const nombre = AppleAuthentication.formatFullName(credencial.fullName)?.trim()
-        || credencial.email?.split('@')[0]
-        || 'Usuario Apple';
 
-      if (!credencial.identityToken) throw new Error('Apple no devolvió un token de identidad válido.');
+      const emailApple = credencial.email || `${credencial.user}@privateray.appleid.com`;
+      const nombreApple = AppleAuthentication.formatFullName(credencial.fullName)?.trim() || 'Usuario Apple';
 
-      await iniciarSesionSocial({ provider: 'apple', identityToken: credencial.identityToken, nombre });
+      await enviarLoginSocialAlBackend({
+        provider: 'apple',
+        email: emailApple,
+        nombre: nombreApple
+      });
     } catch (error) {
       if (error.code !== 'ERR_REQUEST_CANCELED') {
-        const moduloNoDisponible = error.code === 'ERR_UNAVAILABLE'
-          || error.message?.includes('expo-apple-authentication');
-        alert(moduloNoDisponible
-          ? 'Apple Sign-In no está disponible en esta sesión de Expo Go. Actualiza Expo Go o prueba con un development build de la app.'
-          : error.message || 'No se pudo iniciar sesión con Apple.');
+        Alert.alert('Error de Apple', error.message || 'No se pudo iniciar sesión con Apple.');
       }
     }
+  };
+
+  const validarPassword = (pass) => {
+    if (pass.length < 8 || pass.length > 14) {
+      return 'La contraseña debe tener entre 8 y 14 caracteres.';
+    }
+    if (!/[A-Z]/.test(pass)) {
+      return 'La contraseña debe contener al menos una letra mayúscula.';
+    }
+    return null;
   };
 
   const manejarLoginTradicional = async () => {
     if (!email.trim() || !password.trim()) {
       alert('Por favor, completa todos los campos.');
+      return;
+    }
+
+    const errorPassword = validarPassword(password);
+    if (errorPassword) {
+      alert(errorPassword);
       return;
     }
 
@@ -143,7 +141,6 @@ const iniciarSesionSocial = async (perfil) => {
 
   return (
     <ScrollView style={estilos.contenedor} contentContainerStyle={estilos.scrollContent}>
-      
       <View style={estilos.contenedorLogo}>
         <Image 
           source={require('../../assets/images/logo.png')} 
@@ -167,13 +164,7 @@ const iniciarSesionSocial = async (perfil) => {
       </TouchableOpacity>
 
       <Text style={estilos.textoSeparador}>O inicia sesión con</Text>
-      {/*
-      <TouchableOpacity style={estilos.botonSocial} onPress={() => manejarLoginSocial('Facebook')}>
-        <FontAwesome5 name="facebook" size={20} color="#3b5998" style={estilos.iconoSocial} />
-        <Text style={estilos.textoBotonSocial}>Continuar con Facebook</Text>
-      </TouchableOpacity>
-      */}
-      {/* Botón Google directo */}
+
       <TouchableOpacity style={estilos.botonSocial} onPress={manejarLoginGoogle}>
         <AntDesign name="google" size={20} color="#DB4437" style={estilos.iconoSocial} />
         <Text style={estilos.textoBotonSocial}>Continuar con Google</Text>
