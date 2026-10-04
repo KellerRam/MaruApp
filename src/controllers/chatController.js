@@ -18,8 +18,8 @@ const limpiarArchivo = async (ruta) => {
 
 const esMiembro = async (idGrupo, idUsuario) => {
   const resultado = await pool.query(
-    'SELECT 1 FROM grupo_usuario WHERE id_grupo::text = $1::text AND id_usuario::text = $2::text',
-    [idGrupo, idUsuario]
+    'SELECT 1 FROM grupo_usuario WHERE id_grupo = $1::integer AND id_usuario = $2::integer',
+    [Number(idGrupo), Number(idUsuario)]
   );
   return resultado.rows.length > 0;
 };
@@ -28,6 +28,7 @@ const listarMensajes = async (req, res) => {
   try {
     const { idGrupo } = req.params;
     const idUsuario = req.usuarioAutenticado.id;
+
     if (!(await esMiembro(idGrupo, idUsuario))) {
       return res.status(403).json({ error: 'No perteneces a este grupo' });
     }
@@ -39,21 +40,21 @@ const listarMensajes = async (req, res) => {
               (m.id_usuario = $2) AS es_mio
        FROM chat_mensaje m
        INNER JOIN usuario u ON u.id_usuario = m.id_usuario
-       WHERE m.id_grupo = $1
+       WHERE m.id_grupo = $1::integer
        ORDER BY m.creado_en ASC, m.id_mensaje ASC
        LIMIT 200`,
       [idGrupo, idUsuario]
     );
 
-    const mensajesVisibles = resultado.rows
-      .map((mensaje) => ({
-        ...mensaje,
-        archivo_url: mensaje.archivo_url ? crearUrlMedia(mensaje.archivo_url) : null,
-      }));
+    const mensajesVisibles = resultado.rows.map((mensaje) => ({
+      ...mensaje,
+      archivo_url: mensaje.archivo_url ? crearUrlMedia(mensaje.archivo_url) : null,
+    }));
 
-    res.status(200).json({ mensajes: mensajesVisibles });
+    return res.status(200).json({ mensajes: mensajesVisibles });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error('Error en listarMensajes:', error.message);
+    return res.status(500).json({ error: error.message });
   }
 };
 
@@ -117,11 +118,12 @@ const crearMensaje = async (req, res) => {
     if (tipo !== 'texto' && !req.file) {
       return res.status(400).json({ error: 'El archivo del mensaje es obligatorio' });
     }
+
     const archivoUrl = req.file ? `/uploads/chat/${req.file.filename}` : null;
     const resultado = await pool.query(
       `INSERT INTO chat_mensaje
         (id_grupo, id_usuario, tipo, texto, archivo_url, archivo_nombre, mime_type)
-       VALUES ($1, $2, $3, NULLIF($4, ''), $5, $6, $7)
+       VALUES ($1::integer, $2::integer, $3, NULLIF($4, ''), $5, $6, $7)
        RETURNING id_mensaje, id_grupo, id_usuario, tipo, texto, archivo_url,
                  archivo_nombre, mime_type, creado_en`,
       [idGrupo, idUsuario, tipo, texto, archivoUrl, req.file?.originalname || null, req.file?.mimetype || null]
@@ -131,10 +133,11 @@ const crearMensaje = async (req, res) => {
 
     const mensaje = resultado.rows[0];
     if (mensaje.archivo_url) mensaje.archivo_url = crearUrlMedia(mensaje.archivo_url);
-    res.status(201).json({ mensaje });
+    return res.status(201).json({ mensaje });
   } catch (error) {
     await limpiarArchivo(req.file?.path);
-    res.status(500).json({ error: error.message });
+    console.error('Error en crearMensaje:', error.message);
+    return res.status(500).json({ error: error.message });
   }
 };
 
