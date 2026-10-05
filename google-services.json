@@ -1,0 +1,54 @@
+{
+  "project_info": {
+    "project_number": "459535616553",
+    "project_id": "maruapp",
+    "storage_bucket": "maruapp.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:459535616553:android:863ec2515d1c5055582a38",
+        "android_client_info": {
+          "package_name": "com.maruapp"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "459535616553-bg6faseg53sjunst0liece0gom6630uk.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.maruapp",
+            "certificate_hash": "12fcca8229f78ecc5e76bbf15edb9f300f91b321"
+          }
+        },
+        {
+          "client_id": "459535616553-cvqcic2b2fl4s28em8rvmtt10gp35rn0.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB1aoUiS_GT9Qs0RD54FqOFyVDxsYTWtU4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "459535616553-cvqcic2b2fl4s28em8rvmtt10gp35rn0.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "459535616553-icgsebe4e8incmoj3q1na1mr6josf98e.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.maruapp"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -13,6 +13,7 @@ import { apiFetch as fetch } from '../config/apiFetch';
 GoogleSignin.configure({
   webClientId: '459535616553-cvqcic2b2fl4s28em8rvmtt10gp35rn0.apps.googleusercontent.com', // Reemplaza con tu Web Client ID de Google Cloud
   iosClientId: '459535616553-icgsebe4e8incmoj3q1na1mr6josf98e.apps.googleusercontent.com', // (Opcional si usas el plugin nativo, pero recomendado)
+  androidClientId: '459535616553-bg6faseg53sjunst0liece0gom6630uk.apps.googleusercontent.com',
 });
 
 export default function LoginScreen() {
