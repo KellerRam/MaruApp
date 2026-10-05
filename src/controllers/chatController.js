@@ -34,15 +34,18 @@ const listarMensajes = async (req, res) => {
     }
 
     const resultado = await pool.query(
-      `SELECT m.id_mensaje, m.id_usuario, m.tipo, m.texto, m.archivo_url,
-              m.archivo_nombre, m.mime_type, m.creado_en,
-              u.nombre_usuario AS remitente,
-              (m.id_usuario = $2) AS es_mio
-       FROM chat_mensaje m
-       INNER JOIN usuario u ON u.id_usuario = m.id_usuario
-       WHERE m.id_grupo = $1::integer
-       ORDER BY m.creado_en ASC, m.id_mensaje ASC
-       LIMIT 200`,
+      `SELECT * FROM (
+         SELECT m.id_mensaje, m.id_usuario, m.tipo, m.texto, m.archivo_url,
+                m.archivo_nombre, m.mime_type, m.creado_en,
+                u.nombre_usuario AS remitente,
+                (m.id_usuario = $2) AS es_mio
+         FROM chat_mensaje m
+         INNER JOIN usuario u ON u.id_usuario = m.id_usuario
+         WHERE m.id_grupo = $1::integer
+         ORDER BY m.creado_en DESC, m.id_mensaje DESC
+         LIMIT 200
+       ) ultimos
+       ORDER BY creado_en ASC, id_mensaje ASC`,
       [idGrupo, idUsuario]
     );
 

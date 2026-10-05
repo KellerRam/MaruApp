@@ -134,7 +134,7 @@ export default function UserProfileScreen() {
 
       await cerrarSesion();
       cerrarModalEliminar();
-      router.replace('/');
+      router.replace('/login');
     } catch (error) {
       setErrorEliminar(error.message);
     } finally {

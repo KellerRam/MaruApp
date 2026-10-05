@@ -96,7 +96,7 @@ function ContenidoMenuLateral(props) {
         <TouchableOpacity onPress={async () => {
           props.navigation.closeDrawer();
           await cerrarSesion();
-          router.replace('/');
+          router.replace('/login');
         }}>
           <Text style={estilosMenu.textoCerrarSesion}>Cerrar Sesión</Text>
         </TouchableOpacity>

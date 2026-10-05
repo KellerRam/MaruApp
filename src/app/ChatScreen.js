@@ -7,8 +7,8 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
-import { Alert, FlatList, Image, KeyboardAvoidingView, Linking, Modal, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { Alert, FlatList, Image, Keyboard, KeyboardAvoidingView, Linking, Modal, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { API_URL } from '../config/api';
 import { apiFetch as fetch } from '../config/apiFetch';
 
@@ -27,8 +27,20 @@ export default function PantallaChat() {
   const audioRecorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   const audioPlayerRef = useRef(null);
   const audioTimeoutRef = useRef(null);
+  const actualizarRef = useRef(null);
+  const listaRef = useRef(null);
   const router = useRouter();
+  const insets = useSafeAreaInsets();
+  const [tecladoVisible, setTecladoVisible] = useState(false);
 
+  useEffect(() => {
+    const mostrar = Keyboard.addListener(Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow', () => setTecladoVisible(true));
+    const ocultar = Keyboard.addListener(Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide', () => setTecladoVisible(false));
+    return () => { mostrar.remove(); ocultar.remove(); };
+  }, []);
+
+  // Con teclado abierto este cubre el inset inferior; cerrado, la barra se extiende hasta el borde.
+  const paddingInferiorPie = 12 + (tecladoVisible ? 0 : insets.bottom);
   useEffect(() => {
     let activo = true;
     let intervalo = null;
@@ -36,11 +48,23 @@ export default function PantallaChat() {
 
     const iniciar = async () => {
       try {
-        const [usuario, grupo] = await Promise.all([
+        const [usuario, grupoGuardado] = await Promise.all([
           AsyncStorage.getItem('userId'),
           AsyncStorage.getItem('groupId'),
         ]);
-        if (!activo || !usuario || !grupo) return;
+        if (!activo || !usuario) return;
+
+        // groupId solo se guarda al visitar otras pantallas; si falta, se resuelve desde el servidor.
+        let grupo = grupoGuardado;
+        if (!grupo) {
+          const respuestaGrupo = await fetch(`${API_URL}/api/groups/user/${usuario}`);
+          if (!respuestaGrupo.ok) throw new Error('No se pudo obtener el grupo');
+          const datosGrupo = await respuestaGrupo.json();
+          grupo = datosGrupo.grupo?.id_grupo?.toString();
+          if (!grupo) return;
+          await AsyncStorage.setItem('groupId', grupo);
+        }
+        if (!activo) return;
 
         setIdUsuario(Number(usuario));
         setIdGrupo(grupo);
@@ -60,6 +84,7 @@ export default function PantallaChat() {
         };
 
         await actualizar();
+        actualizarRef.current = actualizar;
         if (activo) {
           intervalo = setInterval(() => {
             actualizar().catch((error) => {
@@ -83,7 +108,8 @@ export default function PantallaChat() {
   }, []);
   
   const agregarMensajeLocal = (mensaje) => {
-    setMensajes((prev) => [...prev, { ...mensaje, remitente: 'Tú', es_mio: true }]);
+    setMensajes((prev) => (prev.some((m) => m.id_mensaje === mensaje.id_mensaje) ? prev : [...prev, { ...mensaje, remitente: 'Tú', es_mio: true }]));
+    actualizarRef.current?.().catch(() => {});
   };
 
   const enviarArchivo = async (archivo, tipo) => {
@@ -368,21 +394,21 @@ export default function PantallaChat() {
   const mensajesVisibles = mensajes.filter((item) => !textoBusqueda.trim() || (item.texto || item.archivo_nombre || '').toLowerCase().includes(textoBusqueda.trim().toLowerCase()));
 
   return (
-    <SafeAreaView style={estilos.contenedorPrincipal}>
-      <KeyboardAvoidingView style={estilos.contenedorTeclado} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+    <SafeAreaView style={estilos.contenedorPrincipal} edges={['top', 'left', 'right']}>
+      <KeyboardAvoidingView style={estilos.contenedorTeclado} behavior="padding">
         <View style={estilos.encabezado}>
           <View style={estilos.barraBusqueda}><Feather name="search" size={20} color="#333" style={estilos.iconoBusqueda} /><TextInput style={estilos.inputBusqueda} placeholder="Buscar..." placeholderTextColor="#48d9d9" value={textoBusqueda} onChangeText={setTextoBusqueda} /></View>
           <TouchableOpacity style={estilos.botonCerrar} onPress={() => router.push('/(tabs)')}><Feather name="x" size={24} color="#555" /></TouchableOpacity>
         </View>
-        <FlatList data={mensajesVisibles} keyExtractor={(item) => String(item.id_mensaje)} renderItem={renderizarMensaje} style={estilos.listaContenedor} contentContainerStyle={estilos.listaContenidoInterior} showsVerticalScrollIndicator={false} />
+        <FlatList ref={listaRef} onContentSizeChange={() => listaRef.current?.scrollToEnd({ animated: false })} data={mensajesVisibles} keyExtractor={(item) => String(item.id_mensaje)} renderItem={renderizarMensaje} style={estilos.listaContenedor} contentContainerStyle={estilos.listaContenidoInterior} showsVerticalScrollIndicator={false} />
         {estadoAudio === 'inactivo' ? (
-          <View style={estilos.pieDePagina}>
-            <TouchableOpacity style={estilos.botonIconoBlanco} onPress={abrirAdjuntos} disabled={enviando}><Feather name="paperclip" size={20} color="#777" /></TouchableOpacity>
-            <TextInput style={estilos.inputMensaje} value={mensajeTexto} onChangeText={setMensajeTexto} placeholder="Escribe un mensaje..." placeholderTextColor="#48d9d9" editable={!enviando} />
-            {mensajeTexto.trim().length > 0 ? <TouchableOpacity style={[estilos.botonIconoBlanco, estilos.botonEnviar]} onPress={enviarTexto} disabled={enviando}><Feather name="send" size={18} color="#FFF" /></TouchableOpacity> : <><TouchableOpacity style={estilos.botonIconoBlanco} onPressIn={comenzarAudio} disabled={enviando}><Feather name="mic" size={18} color="#777" /></TouchableOpacity><TouchableOpacity style={estilos.botonIconoBlanco} onPress={tomarFoto} disabled={enviando}><Feather name="camera" size={18} color="#777" /></TouchableOpacity></>}
+          <View style={[estilos.pieDePagina, estilos.pieDePaginaTexto, { paddingBottom: paddingInferiorPie }]}>
+            <TouchableOpacity style={[estilos.botonIconoBlanco, estilos.botonPie]} onPress={abrirAdjuntos} disabled={enviando}><Feather name="paperclip" size={20} color="#777" /></TouchableOpacity>
+            <TextInput style={estilos.inputMensaje} value={mensajeTexto} onChangeText={setMensajeTexto} placeholder="Escribe un mensaje..." placeholderTextColor="#48d9d9" editable={!enviando} multiline scrollEnabled textAlignVertical="center" />
+            {mensajeTexto.trim().length > 0 ? <TouchableOpacity style={[estilos.botonIconoBlanco, estilos.botonEnviar, estilos.botonPie]} onPress={enviarTexto} disabled={enviando}><Feather name="send" size={18} color="#FFF" /></TouchableOpacity> : <><TouchableOpacity style={[estilos.botonIconoBlanco, estilos.botonPie]} onPressIn={comenzarAudio} disabled={enviando}><Feather name="mic" size={18} color="#777" /></TouchableOpacity><TouchableOpacity style={[estilos.botonIconoBlanco, estilos.botonPie]} onPress={tomarFoto} disabled={enviando}><Feather name="camera" size={18} color="#777" /></TouchableOpacity></>}
           </View>
         ) : (
-          <View style={estilos.pieDePagina}><TouchableOpacity style={estilos.botonIconoBlanco} onPressOut={terminarAudio}><Feather name="mic" size={20} color="#D32F2F" /></TouchableOpacity><View style={estilos.contenedorInfoAudio}><Text style={estilos.textoInfoAudio}>Grabando...</Text></View><TouchableOpacity style={[estilos.botonIconoBlanco, estilos.botonEnviar]} onPressOut={terminarAudio}><Feather name="send" size={18} color="#FFF" /></TouchableOpacity></View>
+          <View style={[estilos.pieDePagina, { paddingBottom: paddingInferiorPie }]}><TouchableOpacity style={estilos.botonIconoBlanco} onPressOut={terminarAudio}><Feather name="mic" size={20} color="#D32F2F" /></TouchableOpacity><View style={estilos.contenedorInfoAudio}><Text style={estilos.textoInfoAudio}>Grabando...</Text></View><TouchableOpacity style={[estilos.botonIconoBlanco, estilos.botonEnviar]} onPressOut={terminarAudio}><Feather name="send" size={18} color="#FFF" /></TouchableOpacity></View>
         )}
       </KeyboardAvoidingView>
 
@@ -408,7 +434,9 @@ const estilos = StyleSheet.create({
   iconoBusqueda: { marginRight: 8 }, inputBusqueda: { flex: 1, height: '100%', color: '#333' }, botonCerrar: { padding: 4 }, listaContenedor: { flex: 1 }, listaContenidoInterior: { flexGrow: 1, justifyContent: 'flex-end', paddingHorizontal: 16, paddingBottom: 20 },
   contenedorFilaMensaje: { flexDirection: 'row', alignItems: 'flex-end', marginBottom: 12, width: '100%' }, filaMensajeIzquierda: { justifyContent: 'flex-start' }, filaMensajeDerecha: { justifyContent: 'flex-end' }, contenedorAvatarIzquierdo: { width: 24, marginRight: 8, alignItems: 'center', justifyContent: 'flex-end', paddingBottom: 4 }, contenedorAvatarDerecho: { width: 24, marginLeft: 8, alignItems: 'center', justifyContent: 'flex-end', paddingBottom: 4 }, puntoAvatar: { width: 20, height: 20, borderRadius: 10 }, burbujaMensaje: { maxWidth: '75%', padding: 12, borderRadius: 16, position: 'relative' }, burbujaOtro: { backgroundColor: '#EBEBEB', borderBottomLeftRadius: 4 }, burbujaMia: { backgroundColor: '#C8E8E2', borderBottomRightRadius: 4 }, textoRemitente: { fontSize: 12, fontWeight: 'bold', marginBottom: 4, color: '#087A7A' }, textoMensaje: { fontSize: 14, color: '#333', lineHeight: 20, paddingRight: 16 }, imagenMensaje: { width: 220, height: 180, borderRadius: 10 }, botonAudio: { flexDirection: 'row', alignItems: 'center', gap: 8, minWidth: 130, paddingRight: 16 }, textoArchivo: { color: '#087A7A', fontSize: 14, fontWeight: '600', maxWidth: 170 },
   botonOpcionesMensaje: { position: 'absolute', top: 4, right: 6, padding: 2 },
-  pieDePagina: { backgroundColor: '#7A7A7A', flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 12, minHeight: 64, borderTopLeftRadius: 24, borderTopRightRadius: 24 }, inputMensaje: { flex: 1, backgroundColor: '#999999', height: 40, borderRadius: 20, paddingHorizontal: 16, marginHorizontal: 10, color: '#FFF' }, botonIconoBlanco: { backgroundColor: '#FFF', width: 36, height: 36, borderRadius: 18, justifyContent: 'center', alignItems: 'center', marginHorizontal: 4 }, botonEnviar: { backgroundColor: '#008B8B' }, contenedorInfoAudio: { flex: 1, alignItems: 'center', justifyContent: 'center' }, textoInfoAudio: { color: '#FFF', fontSize: 15, fontWeight: '600' },
+  pieDePaginaTexto: { alignItems: 'flex-end' },
+  botonPie: { marginBottom: 2 },
+  pieDePagina: { backgroundColor: '#7A7A7A', flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 12, minHeight: 64, borderTopLeftRadius: 24, borderTopRightRadius: 24 }, inputMensaje: { flex: 1, backgroundColor: '#999999', minHeight: 40, maxHeight: 120, borderRadius: 20, paddingHorizontal: 16, paddingVertical: 10, marginHorizontal: 10, color: '#FFF' }, botonIconoBlanco: { backgroundColor: '#FFF', width: 36, height: 36, borderRadius: 18, justifyContent: 'center', alignItems: 'center', marginHorizontal: 4 }, botonEnviar: { backgroundColor: '#008B8B' }, contenedorInfoAudio: { flex: 1, alignItems: 'center', justifyContent: 'center' }, textoInfoAudio: { color: '#FFF', fontSize: 15, fontWeight: '600' },
   contenedorModalImagen: { flex: 1, backgroundColor: 'rgba(0,0,0,0.9)', justifyContent: 'center', alignItems: 'center' },
   botonCerrarModal: { position: 'absolute', top: 40, right: 20, zIndex: 10, padding: 10 },
   imagenCompleta: { width: '100%', height: '80%' },
