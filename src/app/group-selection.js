@@ -4,6 +4,7 @@ import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import {
     ActivityIndicator,
+    KeyboardAvoidingView,
     Modal,
     ScrollView,
     StyleSheet,
@@ -129,7 +130,8 @@ export default function GroupSelectionScreen() {
   }
 
   return (
-    <ScrollView style={estilos.contenedor} contentContainerStyle={estilos.scrollContent}>
+    <KeyboardAvoidingView style={estilos.contenedor} behavior="padding">
+    <ScrollView style={estilos.contenedor} contentContainerStyle={estilos.scrollContent} keyboardShouldPersistTaps="handled">
 
 
       {!mostrarFormulario ? (
@@ -243,6 +245,7 @@ export default function GroupSelectionScreen() {
         </View>
       </Modal>
     </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 

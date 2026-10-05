@@ -7,6 +7,7 @@ import {
     ActivityIndicator,
     Alert,
     FlatList,
+    KeyboardAvoidingView,
     Modal,
     StyleSheet,
     Text,
@@ -18,6 +19,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import FormPickerInput from '../components/ui/FormPickerInput';
 import { API_URL } from '../config/api';
 import { apiFetch as fetch } from '../config/apiFetch';
+import { useSincronizacion } from '../hooks/use-sincronizacion';
 
 const NOMBRES_MESES = [
   'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
@@ -25,6 +27,25 @@ const NOMBRES_MESES = [
 ];
 
 const horaSinSegundos = (hora) => String(hora || '').slice(0, 5);
+
+const filtrarSintomas = (lista, tipo) => {
+  const ahora = new Date();
+  if (tipo === 'semana') {
+    const inicioSemana = new Date();
+    inicioSemana.setDate(ahora.getDate() - 7);
+    return lista.filter((s) => {
+      const fechaSintoma = new Date(s.fecha_sintoma);
+      return fechaSintoma >= inicioSemana && fechaSintoma <= ahora;
+    });
+  }
+  if (tipo === 'mes') {
+    return lista.filter((s) => {
+      const partes = String(s.fecha_sintoma).split('T')[0].split('-');
+      return Number(partes[0]) === ahora.getFullYear() && Number(partes[1]) === ahora.getMonth() + 1;
+    });
+  }
+  return lista;
+};
 
 export default function SymptomHistoryScreen() {
   const router = useRouter();
@@ -58,7 +79,7 @@ export default function SymptomHistoryScreen() {
       const datos = await respuesta.json();
       if (!estaActiva()) return;
       setSintomas(datos.sintomas || []);
-      setSintomasFiltrados(datos.sintomas || []);
+      setSintomasFiltrados(filtrarSintomas(datos.sintomas || [], filtroActivo));
     } catch (error) {
       if (estaActiva()) setErrorMsg(error.message);
     } finally {
@@ -72,29 +93,11 @@ export default function SymptomHistoryScreen() {
     return () => { activo = false; };
   }, [router]);
 
+  useSincronizacion(() => cargarHistorial());
+
   const aplicarFiltro = (tipo) => {
     setFiltroActivo(tipo);
-    const ahora = new Date();
-
-    if (tipo === 'todos') {
-      setSintomasFiltrados(sintomas);
-    } else if (tipo === 'semana') {
-      const inicioSemana = new Date();
-      inicioSemana.setDate(ahora.getDate() - 7);
-      const filtrados = sintomas.filter((s) => {
-        const fechaSintoma = new Date(s.fecha_sintoma);
-        return fechaSintoma >= inicioSemana && fechaSintoma <= ahora;
-      });
-      setSintomasFiltrados(filtrados);
-    } else if (tipo === 'mes') {
-      const mesActual = ahora.getMonth() + 1;
-      const anioActual = ahora.getFullYear();
-      const filtrados = sintomas.filter((s) => {
-        const partes = String(s.fecha_sintoma).split('T')[0].split('-');
-        return Number(partes[0]) === anioActual && Number(partes[1]) === mesActual;
-      });
-      setSintomasFiltrados(filtrados);
-    }
+    setSintomasFiltrados(filtrarSintomas(sintomas, tipo));
   };
 
   const formatearFechaVisual = (fechaStr) => {
@@ -242,7 +245,7 @@ export default function SymptomHistoryScreen() {
 
       {/* Modal para Editar Síntoma */}
       <Modal visible={modalVisible} transparent animationType="fade" onRequestClose={() => setModalVisible(false)}>
-        <View style={estilos.fondoModal}>
+        <KeyboardAvoidingView style={estilos.fondoModal} behavior="padding">
           <View style={estilos.modalContenido}>
             <Text style={estilos.tituloModal}>Editar Síntoma</Text>
             <TextInput style={estilos.input} placeholder="Síntoma" placeholderTextColor="#48d9d9" value={nombreEdit} onChangeText={setNombreEdit} />
@@ -272,7 +275,7 @@ export default function SymptomHistoryScreen() {
               <Text style={estilos.textoBotonCancelar}>Cancelar</Text>
             </TouchableOpacity>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
     </SafeAreaView>
   );

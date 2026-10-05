@@ -2,10 +2,11 @@
 import { Feather } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useEffect, useRef, useState } from 'react';
-import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { KeyboardAvoidingView, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import FormPickerInput from '../components/ui/FormPickerInput';
 import { API_URL } from '../config/api';
 import { apiFetch as fetch } from '../config/apiFetch';
+import { useSincronizacion } from '../hooks/use-sincronizacion';
 
 export default function ManageOperationsScreen() {
   const montadaRef = useRef(false);
@@ -41,6 +42,8 @@ export default function ManageOperationsScreen() {
     cargarCuidadoresGrupo();
     return () => { montadaRef.current = false; };
   }, []);
+
+  useSincronizacion(() => cargarCuidadoresGrupo());
 
   const cargarCuidadoresGrupo = async () => {
     try {
@@ -106,7 +109,8 @@ export default function ManageOperationsScreen() {
   };
 
   return (
-    <ScrollView style={estilos.contenedor} contentContainerStyle={estilos.scrollContent}>
+    <KeyboardAvoidingView style={estilos.contenedor} behavior="padding">
+    <ScrollView style={estilos.contenedor} contentContainerStyle={estilos.scrollContent} keyboardShouldPersistTaps="handled">
       <Text style={estilos.titulo}>Panel de Operaciones</Text>
 
       {/* Botones principales estilo barra de acciones (+, Editar, Borrar) */}
@@ -244,6 +248,7 @@ export default function ManageOperationsScreen() {
         </View>
       )}
     </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 

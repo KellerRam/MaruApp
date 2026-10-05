@@ -6,6 +6,7 @@ import {
     ActivityIndicator,
     Alert,
     FlatList,
+    KeyboardAvoidingView,
     Modal,
     ScrollView,
     StyleSheet,
@@ -18,6 +19,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import FormPickerInput from '../../components/ui/FormPickerInput';
 import { API_URL } from '../../config/api';
 import { apiFetch as fetch } from '../../config/apiFetch';
+import { useSincronizacion } from '../../hooks/use-sincronizacion';
 
 const NOMBRES_MESES = [
   'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
@@ -272,6 +274,8 @@ export default function PantallaCalendario() {
   useEffect(() => {
     cargarDatosServidor();
   }, [cargarDatosServidor]);
+
+  useSincronizacion(cargarDatosServidor);
 
   const cargarMasMesesProgresivo = () => {
     setListaMeses((mesesActuales) => {
@@ -897,7 +901,7 @@ export default function PantallaCalendario() {
           animationType="slide"
           onRequestClose={() => setModalGestionHorario(false)}
         >
-          <View style={estilos.fondoModal}>
+          <KeyboardAvoidingView style={estilos.fondoModal} behavior="padding">
             <View style={estilos.tarjetaModalForm}>
               <View style={estilos.cabeceraModalForm}>
                 <Text style={estilos.tituloModalForm}>Gestionar Horarios</Text>
@@ -1144,7 +1148,7 @@ export default function PantallaCalendario() {
                 </TouchableOpacity>
               </View>
             </View>
-          </View>
+          </KeyboardAvoidingView>
         </Modal>
       </SafeAreaView>
     );

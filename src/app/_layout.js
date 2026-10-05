@@ -6,7 +6,7 @@ import { useEffect, useState } from 'react';
 import { BackHandler, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { API_URL } from '../config/api';
 import { apiFetch as fetch } from '../config/apiFetch';
-import { cerrarSesion } from '../utils/session';
+import { alCerrarSesion, cerrarSesion } from '../utils/session';
 
 function ContenidoMenuLateral(props) {
   const router = useRouter();
@@ -42,6 +42,8 @@ function ContenidoMenuLateral(props) {
       if (temporizadorReintento) clearTimeout(temporizadorReintento);
     };
   }, [pathname]); // Se recarga cada vez que cambias de pantalla o abres el menú
+
+  useEffect(() => alCerrarSesion(() => setUsuario(null)), []);
 
   const nombreUsuario = usuario?.nombre_usuario || 'Cargando perfil...';
   const inicialAvatar = nombreUsuario.charAt(0).toUpperCase();
@@ -92,8 +94,8 @@ function ContenidoMenuLateral(props) {
 
       <View style={estilosMenu.pieMenu}>
         <TouchableOpacity onPress={async () => {
-          await cerrarSesion();
           props.navigation.closeDrawer();
+          await cerrarSesion();
           router.replace('/');
         }}>
           <Text style={estilosMenu.textoCerrarSesion}>Cerrar Sesión</Text>

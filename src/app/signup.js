@@ -2,7 +2,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
-import { Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Image, KeyboardAvoidingView, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { API_URL } from '../config/api';
 import { apiFetch as fetch } from '../config/apiFetch';
 
@@ -127,7 +127,8 @@ export default function SignupScreen() {
   };
 
   return (
-    <ScrollView style={estilos.contenedor} contentContainerStyle={estilos.scrollContent}>
+    <KeyboardAvoidingView style={estilos.contenedor} behavior="padding">
+    <ScrollView style={estilos.contenedor} contentContainerStyle={estilos.scrollContent} keyboardShouldPersistTaps="handled">
       
       {/* Botón superior para regresar al login */}
       <TouchableOpacity style={estilos.botonRegresar} onPress={() => router.replace('/login')}>
@@ -217,6 +218,7 @@ export default function SignupScreen() {
         </>
       )}
     </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 

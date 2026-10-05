@@ -4,6 +4,7 @@ import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import {
     ActivityIndicator,
+    KeyboardAvoidingView,
     Modal,
     ScrollView,
     StyleSheet,
@@ -75,7 +76,8 @@ export default function CreateGroupScreen() {
   };
 
   return (
-    <ScrollView style={estilos.contenedor} contentContainerStyle={estilos.scrollContent}>
+    <KeyboardAvoidingView style={estilos.contenedor} behavior="padding">
+    <ScrollView style={estilos.contenedor} contentContainerStyle={estilos.scrollContent} keyboardShouldPersistTaps="handled">
       <Text style={estilos.titulo}>Crear Grupo de Cuidado</Text>
       <Text style={estilos.subtitulo}>
         Asigna un nombre a tu equipo para comenzar a gestionar pacientes y horarios.
@@ -147,6 +149,7 @@ export default function CreateGroupScreen() {
         </View>
       </Modal>
     </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 

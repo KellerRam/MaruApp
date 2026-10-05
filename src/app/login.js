@@ -5,7 +5,7 @@ import { GoogleSignin } from '@react-native-google-signin/google-signin';
 import * as AppleAuthentication from 'expo-apple-authentication';
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
-import { Alert, Image, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, Image, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { API_URL } from '../config/api';
 import { apiFetch as fetch } from '../config/apiFetch';
 
@@ -139,7 +139,8 @@ export default function LoginScreen() {
   };
 
   return (
-    <ScrollView style={estilos.contenedor} contentContainerStyle={estilos.scrollContent}>
+    <KeyboardAvoidingView style={estilos.contenedor} behavior="padding">
+    <ScrollView style={estilos.contenedor} contentContainerStyle={estilos.scrollContent} keyboardShouldPersistTaps="handled">
       <View style={estilos.contenedorLogo}>
         <Image 
           source={require('../../assets/images/logo.png')} 
@@ -178,6 +179,7 @@ export default function LoginScreen() {
         <Text style={estilos.textoRegistro}>Registrarse</Text>
       </TouchableOpacity>
     </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 

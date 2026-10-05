@@ -3,6 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import {
+    KeyboardAvoidingView,
     Modal,
     ScrollView,
     StyleSheet,
@@ -143,7 +144,8 @@ export default function UserProfileScreen() {
 
   return (
     <SafeAreaView style={estilos.contenedor} edges={['top']}>
-      <ScrollView style={estilos.contenedor} contentContainerStyle={estilos.scrollContent}>
+      <KeyboardAvoidingView style={estilos.contenedor} behavior="padding">
+      <ScrollView style={estilos.contenedor} contentContainerStyle={estilos.scrollContent} keyboardShouldPersistTaps="handled">
       
       {/* Botón Cerrar */}
       <View style={estilos.encabezado}>
@@ -288,7 +290,7 @@ export default function UserProfileScreen() {
       </View>
 
       <Modal visible={modalEliminar} transparent animationType="fade" onRequestClose={cerrarModalEliminar}>
-        <View style={estilos.fondoModalEliminar}>
+        <KeyboardAvoidingView style={estilos.fondoModalEliminar} behavior="padding">
           <View style={estilos.cajaModalEliminar}>
             <Text style={estilos.tituloModalEliminar}>Eliminar cuenta</Text>
             <Text style={estilos.textoModalEliminar}>
@@ -316,10 +318,11 @@ export default function UserProfileScreen() {
               </TouchableOpacity>
             </View>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }

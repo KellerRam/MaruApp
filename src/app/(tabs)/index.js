@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { usePathname } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { Alert, Modal, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, AppState, KeyboardAvoidingView, Modal, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import FormPickerInput from '../../components/ui/FormPickerInput';
 import { API_URL } from '../../config/api';
 import { apiFetch as fetch } from '../../config/apiFetch';
@@ -144,8 +144,13 @@ export default function PantallaInicio() {
 
     cargarResumen();
 
+    const intervalo = setInterval(() => {
+      if (AppState.currentState === 'active') cargarResumen();
+    }, 5000);
+
     return () => {
       isMounted = false;
+      clearInterval(intervalo);
     };
   }, [pathname]); // Se dispara y actualiza al instante cada vez que cambia la ruta de navegación
 
@@ -314,7 +319,7 @@ export default function PantallaInicio() {
         </TouchableOpacity>
 
         <Modal visible={modalSintoma} transparent animationType="fade" onRequestClose={() => setModalSintoma(false)}>
-          <View style={estilos.fondoModal}>
+          <KeyboardAvoidingView style={estilos.fondoModal} behavior="padding">
             <View style={estilos.modalSintoma}>
               <Text style={estilos.tituloModal}>Registrar síntoma</Text>
               <TextInput style={estilos.inputSintoma} placeholder="Síntoma" placeholderTextColor="#48d9d9" value={nombreSintoma} onChangeText={setNombreSintoma} />
@@ -342,11 +347,11 @@ export default function PantallaInicio() {
                 <Text style={estilos.textoCancelarSintoma}>Cancelar</Text>
               </TouchableOpacity>
             </View>
-          </View>
+          </KeyboardAvoidingView>
         </Modal>
 
         <Modal visible={modalAnimo} transparent animationType="fade" onRequestClose={omitirCheckinAnimo}>
-          <View style={estilos.fondoModal}>
+          <KeyboardAvoidingView style={estilos.fondoModal} behavior="padding">
             <View style={estilos.modalAnimo}>
               <TouchableOpacity style={estilos.botonCerrarAnimo} onPress={omitirCheckinAnimo}>
                 <Text style={estilos.textoCerrarAnimo}>✕</Text>
@@ -378,7 +383,7 @@ export default function PantallaInicio() {
                 <Text style={estilos.textoOmitirAnimo}>Omitir</Text>
               </TouchableOpacity>
             </View>
-          </View>
+          </KeyboardAvoidingView>
         </Modal>
 
       </ScrollView>

@@ -4,21 +4,23 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import * as Clipboard from 'expo-clipboard';
 import { useEffect, useRef, useState } from 'react';
 import {
-  Alert,
-  FlatList,
-  Modal,
-  Platform,
-  SafeAreaView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    Alert,
+    FlatList,
+    KeyboardAvoidingView,
+    Modal,
+    Platform,
+    SafeAreaView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from 'react-native';
 
 import QRCode from 'react-native-qrcode-svg';
 import { API_URL } from '../../config/api';
 import { apiFetch as fetch } from '../../config/apiFetch';
+import { useSincronizacion } from '../../hooks/use-sincronizacion';
 
 export default function PantallaGrupo() {
   const montadaRef = useRef(false);
@@ -72,6 +74,8 @@ export default function PantallaGrupo() {
     cargarMiembros();
     return () => { montadaRef.current = false; };
   }, []);
+
+  useSincronizacion(cargarMiembros);
 
   const cambiarRol = (id, nombre) => {
     setMiembroParaRol({ id, nombre });
@@ -345,7 +349,7 @@ export default function PantallaGrupo() {
         animationType="fade"
         onRequestClose={() => setMostrarPacienteManual(false)}
       >
-        <View style={estilos.fondoModal}>
+        <KeyboardAvoidingView style={estilos.fondoModal} behavior="padding">
           <View style={estilos.modalInvitacion}>
             <Text style={estilos.tituloModal}>Agregar paciente</Text>
             <Text style={estilos.enlaceInvitacion}>Este perfil no requiere correo ni acceso desde un celular.</Text>
@@ -392,7 +396,7 @@ export default function PantallaGrupo() {
               <Text style={estilos.textoCancelarModal}>Cancelar</Text>
             </TouchableOpacity>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
 
     </SafeAreaView>

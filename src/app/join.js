@@ -7,6 +7,7 @@ import { useRef, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
+    KeyboardAvoidingView,
     Modal,
     ScrollView,
     StyleSheet,
@@ -103,7 +104,8 @@ export default function JoinGroupScreen() {
   };
 
   return (
-    <ScrollView style={estilos.contenedor} contentContainerStyle={estilos.scrollContent}>
+    <KeyboardAvoidingView style={estilos.contenedor} behavior="padding">
+    <ScrollView style={estilos.contenedor} contentContainerStyle={estilos.scrollContent} keyboardShouldPersistTaps="handled">
       <View style={estilos.cabecera}>
         <TouchableOpacity style={estilos.botonRegresar} onPress={() => router.back()}>
           <Feather name="arrow-left" size={24} color="#333" />
@@ -173,6 +175,7 @@ export default function JoinGroupScreen() {
         </View>
       </Modal>
     </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 

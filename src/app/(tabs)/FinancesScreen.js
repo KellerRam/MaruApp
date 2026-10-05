@@ -1,10 +1,11 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Image, Modal, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Image, KeyboardAvoidingView, Modal, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import FormPickerInput from '../../components/ui/FormPickerInput';
 import { API_URL } from '../../config/api';
 import { apiFetch as fetch } from '../../config/apiFetch';
+import { useSincronizacion } from '../../hooks/use-sincronizacion';
 
 const VACIO = { fecha: new Date().toISOString().slice(0, 10), hora: '12:00', cantidad: '', descripcion: '', comprobante: null };
 const dinero = (valor) => `Q${Number(valor || 0).toFixed(2)}`;
@@ -55,6 +56,20 @@ export default function PantallaFinanzas() {
     })();
     return () => { montadaRef.current = false; };
   }, []);
+
+  // Resuelve el grupo en cada ciclo para no mostrar datos de una sesión anterior.
+  useSincronizacion(async () => {
+    const usuario = await AsyncStorage.getItem('userId');
+    if (!usuario || !montadaRef.current) return;
+    const respuesta = await fetch(`${API_URL}/api/groups/user/${usuario}`);
+    if (!respuesta.ok) return;
+    const datos = await respuesta.json();
+    const idGrupo = datos.grupo?.id_grupo;
+    if (!idGrupo || !montadaRef.current) return;
+    setUsuarioActual(Number(usuario));
+    setGrupo(idGrupo);
+    await cargar(idGrupo);
+  });
 
   const abrirNuevo = (nuevoTipo) => { setTipo(nuevoTipo); setEditando(null); setFormulario({ ...VACIO }); setError(''); setModal('formulario'); };
   
@@ -143,11 +158,11 @@ export default function PantallaFinanzas() {
     <View style={estilos.resumen}><Text style={estilos.etiqueta}>MOVIMIENTOS DEL MES</Text><Text style={estilos.numero}>{filas.length}</Text><Text>Gastos {dinero(gastos)}  |  Ingresos {dinero(ingresos)}</Text></View>
     <TouchableOpacity style={[estilos.boton, estilos.verde]} onPress={() => setModal('balance')}><Text style={estilos.oscuro}>VISUALIZAR BALANCE</Text></TouchableOpacity>
   </ScrollView>
-  <Modal visible={Boolean(modal)} transparent animationType="slide" onRequestClose={() => setModal(null)}><View style={estilos.fondo}><View style={estilos.modal}>
+  <Modal visible={Boolean(modal)} transparent animationType="slide" onRequestClose={() => setModal(null)}><KeyboardAvoidingView style={estilos.fondo} behavior="padding"><View style={estilos.modal}>
     {modal === 'formulario' ? <Formulario tipo={tipo} formulario={formulario} cambiar={cambiar} editar={Boolean(editando)} elegirComprobante={elegirComprobante} guardar={guardar} eliminarRegistro={eliminarRegistro} guardando={guardando} error={error} cerrar={() => setModal(null)} /> : null}
     {modal === 'presupuesto' ? <Presupuesto filas={filas} mes={mes} setMes={setMes} manejarPresionFila={manejarPresionFila} abrirEdicion={abrirEdicion} cerrar={() => setModal(null)} /> : null}
     {modal === 'balance' ? <View><Text style={estilos.tituloModal}>Balance actual</Text><Text style={estilos.balance}>{dinero(ingresos - gastos)}</Text><Text style={estilos.nota}>Ingresos totales menos gastos totales del mes.</Text><TouchableOpacity style={estilos.cerrar} onPress={() => setModal(null)}><Text>CERRAR</Text></TouchableOpacity></View> : null}
-  </View></View></Modal>
+  </View></KeyboardAvoidingView></Modal>
 
   <Modal visible={Boolean(imagenComprobanteModal)} transparent animationType="fade" onRequestClose={() => setImagenComprobanteModal(null)}>
     <View style={estilos.fondoComprobante}>
@@ -162,7 +177,7 @@ export default function PantallaFinanzas() {
 }
 
 function Formulario({ tipo, formulario, cambiar, editar, elegirComprobante, guardar, eliminarRegistro, guardando, error, cerrar }) {
-  return <ScrollView><Text style={estilos.tituloModal}>{editar ? 'Editar registro' : tipo === 'gasto' ? 'Registrar gasto' : 'Registrar ingreso'}</Text>{error ? <Text style={estilos.error}>{error}</Text> : null}
+  return <ScrollView keyboardShouldPersistTaps="handled"><Text style={estilos.tituloModal}>{editar ? 'Editar registro' : tipo === 'gasto' ? 'Registrar gasto' : 'Registrar ingreso'}</Text>{error ? <Text style={estilos.error}>{error}</Text> : null}
     <Text style={estilos.label}>Fecha *</Text>
     <FormPickerInput pickerType="date" modalTitle="Fecha del movimiento" style={estilos.input} value={formulario.fecha} onChangeText={(v) => cambiar('fecha', v)} placeholder="YYYY-MM-DD" />
     <Text style={estilos.label}>Hora *</Text>
