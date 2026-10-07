@@ -4,7 +4,7 @@ import { useCallback } from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { API_URL } from '../config/api';
 import { apiFetch as fetch } from '../config/apiFetch';
-import { registrarDispositivoPush } from '../utils/registroPush';
+import { estadoNotificacionInicial, registrarDispositivoPush } from '../utils/registroPush';
 
 export default function Index() {
   const router = useRouter();
@@ -34,6 +34,14 @@ export default function Index() {
         }
       } catch (error) {
         console.warn('No se pudo restaurar la sesión:', error.message);
+      }
+      if (estadoNotificacionInicial.abrirChat) {
+        estadoNotificacionInicial.abrirChat = false;
+        if (activo && destino !== '/login') {
+          router.replace('/(tabs)');
+          router.push('/ChatScreen');
+          return;
+        }
       }
       if (activo) router.replace(destino);
     };

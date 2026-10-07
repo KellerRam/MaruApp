@@ -3,12 +3,15 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Notifications from 'expo-notifications';
 import { usePathname, useRouter } from 'expo-router';
 import { Drawer } from 'expo-router/drawer';
+import * as SplashScreen from 'expo-splash-screen';
 import { useEffect, useState } from 'react';
 import { BackHandler, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { API_URL } from '../config/api';
 import { apiFetch as fetch } from '../config/apiFetch';
-import { registrarDispositivoPush } from '../utils/registroPush';
+import { estadoNotificacionInicial, registrarDispositivoPush } from '../utils/registroPush';
 import { alCerrarSesion, cerrarSesion } from '../utils/session';
+
+SplashScreen.preventAutoHideAsync().catch(() => {});
 
 function ContenidoMenuLateral(props) {
   const router = useRouter();
@@ -110,9 +113,41 @@ function ContenidoMenuLateral(props) {
 export default function RootLayout() {
   const router = useRouter();
   const pathname = usePathname();
+  const [sesionLista, setSesionLista] = useState(false);
+
+  // Ninguna ruta se monta hasta leer las credenciales del storage; el splash sigue visible.
+  useEffect(() => {
+    let activo = true;
+    (async () => {
+      try {
+        await AsyncStorage.multiGet(['userToken', 'userId', 'groupId']);
+        if (Platform.OS !== 'web') {
+          if (Platform.OS === 'android') {
+            await Notifications.setNotificationChannelAsync('default', {
+              name: 'Default',
+              importance: Notifications.AndroidImportance.MAX,
+              vibrationPattern: [0, 250, 250, 250],
+              lightColor: '#FF231F7C',
+              sound: 'default',
+            });
+          }
+          const ultima = await Notifications.getLastNotificationResponseAsync();
+          if (ultima?.notification.request.content.data?.tipo === 'chat') estadoNotificacionInicial.abrirChat = true;
+        }
+      } catch (error) {
+        console.warn('No se pudo hidratar la sesión:', error.message);
+      } finally {
+        if (activo) {
+          setSesionLista(true);
+          SplashScreen.hideAsync().catch(() => {});
+        }
+      }
+    })();
+    return () => { activo = false; };
+  }, []);
 
   useEffect(() => {
-    if (Platform.OS === 'web') return undefined;
+    if (Platform.OS === 'web' || !sesionLista) return undefined;
 
     // Si el sistema rota el token de push, se vuelve a registrar en el servidor.
     const tokenListener = Notifications.addPushTokenListener(() => { registrarDispositivoPush(); });
@@ -124,7 +159,7 @@ export default function RootLayout() {
       tokenListener.remove();
       respuestaListener.remove();
     };
-  }, [router]);
+  }, [router, sesionLista]);
 
   useEffect(() => {
     if (Platform.OS !== 'android') return undefined;
@@ -137,6 +172,8 @@ export default function RootLayout() {
 
     return () => subscription.remove();
   }, [pathname, router]);
+
+  if (!sesionLista) return null;
 
   return (
     <Drawer

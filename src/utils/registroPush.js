@@ -16,6 +16,9 @@ Notifications.setNotificationHandler({
   }),
 });
 
+// Marca que la app se abrió desde una notificación de chat, para que index.js no pise esa navegación.
+export const estadoNotificacionInicial = { abrirChat: false };
+
 // Registra el token de push del dispositivo para el usuario con sesión; es seguro llamarlo varias veces.
 export const registrarDispositivoPush = async () => {
   try {
