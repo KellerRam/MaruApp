@@ -24,7 +24,7 @@ const hashCodigo = (email, codigo) => {
   return crypto.createHmac('sha256', secret).update(`${email}:${codigo}`).digest('hex');
 };
 
-const enviarCodigoPorCorreo = async (email, codigo) => {
+const enviarCodigoPorCorreo = async (email, codigo, asunto = 'Código de verificación de Maru') => {
   const host = process.env.SMTP_HOST;
   const port = Number(process.env.SMTP_PORT || 587);
   const user = process.env.SMTP_USER;
@@ -50,7 +50,7 @@ const enviarCodigoPorCorreo = async (email, codigo) => {
     await transportador.sendMail({
       from,
       to: email,
-      subject: 'Código de verificación de Maru',
+      subject: asunto,
       text: `Tu código de verificación es ${codigo}. Caduca en 10 minutos.`,
       html: `<p>Tu código de verificación de Maru es:</p><p style="font-size: 24px; font-weight: bold; letter-spacing: 6px">${codigo}</p><p>Caduca en 10 minutos.</p>`
     });
@@ -186,6 +186,134 @@ const verificarCodigo = async (req, res) => {
   } catch (error) {
     console.error('Error en verificarCodigo:', error.message);
     return res.status(500).json({ error: 'No se pudo verificar el código' });
+  }
+};
+
+const PROPOSITO_RESET = 'password-reset';
+
+const passwordNuevaValida = (pass) => typeof pass === 'string' && pass.length >= 8 && pass.length <= 14 && /[A-Z]/.test(pass);
+
+// Responde igual exista o no el correo para no revelar qué cuentas están registradas.
+const solicitarRecuperacionPassword = async (req, res) => {
+  const mensajeGenerico = { mensaje: 'Si el correo está registrado, enviamos un código para restablecer la contraseña' };
+  try {
+    const email = normalizarEmail(req.body?.email);
+    if (!emailValido(email)) {
+      return res.status(400).json({ error: 'Introduce un correo electrónico válido' });
+    }
+
+    const usuario = await pool.query('SELECT id_usuario FROM Usuario WHERE LOWER(correo) = $1', [email]);
+    if (usuario.rows.length === 0) return res.status(200).json(mensajeGenerico);
+
+    const codigo = crypto.randomInt(100000, 1000000).toString();
+    const codigoHash = hashCodigo(email, codigo);
+    const guardado = await pool.query(
+      `INSERT INTO recuperacion_password (correo, codigo_hash, expira_en, intentos, verificado_en, ultimo_envio)
+       VALUES ($1, $2, NOW() + INTERVAL '15 minutes', 0, NULL, NOW())
+       ON CONFLICT (correo) DO UPDATE SET
+          codigo_hash = EXCLUDED.codigo_hash,
+          expira_en = EXCLUDED.expira_en,
+          intentos = 0,
+          verificado_en = NULL,
+          ultimo_envio = NOW()
+       WHERE recuperacion_password.ultimo_envio <= NOW() - INTERVAL '60 seconds'
+       RETURNING correo`,
+      [email, codigoHash]
+    );
+    if (guardado.rows.length === 0) return res.status(200).json(mensajeGenerico);
+
+    try {
+      await enviarCodigoPorCorreo(email, codigo, 'Código para restablecer tu contraseña de Maru');
+    } catch (error) {
+      console.error('No se pudo enviar el código de recuperación:', error.message);
+      await pool.query('DELETE FROM recuperacion_password WHERE correo = $1 AND codigo_hash = $2', [email, codigoHash]);
+    }
+    return res.status(200).json(mensajeGenerico);
+  } catch (error) {
+    console.error('Error en solicitarRecuperacionPassword:', error.message);
+    return res.status(500).json({ error: 'No se pudo procesar la solicitud' });
+  }
+};
+
+const verificarCodigoRecuperacion = async (req, res) => {
+  try {
+    const email = normalizarEmail(req.body?.email);
+    const codigo = typeof req.body?.codigo === 'string' ? req.body.codigo.trim() : '';
+    if (!emailValido(email) || !/^\d{6}$/.test(codigo)) {
+      return res.status(400).json({ error: 'Correo o código inválido' });
+    }
+
+    const resultado = await pool.query(
+      'SELECT codigo_hash, intentos, expira_en > NOW() AS vigente FROM recuperacion_password WHERE correo = $1',
+      [email]
+    );
+    const registro = resultado.rows[0];
+    if (!registro || !registro.codigo_hash || !registro.vigente) {
+      return res.status(400).json({ error: 'El código expiró o no es válido. Solicita uno nuevo.' });
+    }
+    if (registro.intentos >= OTP_MAX_ATTEMPTS) {
+      return res.status(429).json({ error: 'Demasiados intentos. Solicita un código nuevo.' });
+    }
+
+    const esperado = Buffer.from(hashCodigo(email, codigo), 'hex');
+    const guardado = Buffer.from(String(registro.codigo_hash).trim(), 'hex');
+    if (esperado.length !== guardado.length || !crypto.timingSafeEqual(esperado, guardado)) {
+      await pool.query('UPDATE recuperacion_password SET intentos = intentos + 1 WHERE correo = $1', [email]);
+      return res.status(400).json({ error: 'Código incorrecto.' });
+    }
+
+    await pool.query(
+      `UPDATE recuperacion_password
+       SET codigo_hash = NULL, verificado_en = NOW(), expira_en = NOW() + INTERVAL '10 minutes'
+       WHERE correo = $1`,
+      [email]
+    );
+    const resetToken = jwt.sign({ purpose: PROPOSITO_RESET, email }, process.env.JWT_SECRET, { expiresIn: '10m' });
+    return res.status(200).json({ mensaje: 'Código verificado correctamente', resetToken });
+  } catch (error) {
+    console.error('Error en verificarCodigoRecuperacion:', error.message);
+    return res.status(500).json({ error: 'No se pudo verificar el código' });
+  }
+};
+
+const restablecerPassword = async (req, res) => {
+  try {
+    const email = normalizarEmail(req.body?.email);
+    const { resetToken, password } = req.body || {};
+    if (!emailValido(email) || typeof resetToken !== 'string') {
+      return res.status(400).json({ error: 'Solicitud inválida' });
+    }
+    if (!passwordNuevaValida(password)) {
+      return res.status(400).json({ error: 'La contraseña debe tener entre 8 y 14 caracteres y al menos una mayúscula.' });
+    }
+
+    let payload;
+    try {
+      payload = jwt.verify(resetToken, process.env.JWT_SECRET);
+    } catch {
+      return res.status(401).json({ error: 'La verificación expiró. Solicita un código nuevo.' });
+    }
+    if (payload.purpose !== PROPOSITO_RESET || payload.email !== email) {
+      return res.status(401).json({ error: 'La verificación no es válida' });
+    }
+
+    // El borrado hace que la verificación sirva una sola vez.
+    const consumido = await pool.query(
+      `DELETE FROM recuperacion_password
+       WHERE correo = $1 AND verificado_en IS NOT NULL AND expira_en > NOW()
+       RETURNING correo`,
+      [email]
+    );
+    if (consumido.rows.length === 0) {
+      return res.status(400).json({ error: 'La verificación expiró. Solicita un código nuevo.' });
+    }
+
+    const passwordHash = await bcrypt.hash(password, 10);
+    await pool.query('UPDATE Usuario SET password_usuario = $1 WHERE LOWER(correo) = $2', [passwordHash, email]);
+    return res.status(200).json({ mensaje: 'Contraseña actualizada correctamente' });
+  } catch (error) {
+    console.error('Error en restablecerPassword:', error.message);
+    return res.status(500).json({ error: 'No se pudo actualizar la contraseña' });
   }
 };
 
@@ -326,29 +454,12 @@ const eliminarCuentaUsuario = async (req, res) => {
     if (!passwordValido) {
       return res.status(401).json({ error: 'Contraseña incorrecta' });
     }
+    await pool.query('DELETE FROM Usuario WHERE id_usuario = $1', [idUsuario]);
 
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
-      await client.query('DELETE FROM notificacion WHERE id_usuario = $1', [idUsuario]);
-      await client.query('DELETE FROM horario_cuidado WHERE id_cuidador = $1', [idUsuario]);
-      await client.query('DELETE FROM sintoma WHERE id_usuario = $1', [idUsuario]);
-      await client.query('DELETE FROM chat_mensaje WHERE id_usuario = $1', [idUsuario]);
-      await client.query('DELETE FROM paciente WHERE id_usuario = $1', [idUsuario]);
-      await client.query('DELETE FROM cuidador WHERE id_usuario = $1', [idUsuario]);
-      await client.query('DELETE FROM grupo_usuario WHERE id_usuario = $1', [idUsuario]);
-      await client.query('DELETE FROM Usuario WHERE id_usuario = $1', [idUsuario]);
-      await client.query('COMMIT');
-    } catch (error) {
-      await client.query('ROLLBACK').catch(() => {});
-      throw error;
-    } finally {
-      client.release();
-    }
-
-    res.status(200).json({ mensaje: 'Cuenta eliminada permanentemente' });
+    return res.status(200).json({ mensaje: 'Cuenta eliminada permanentemente' });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error('Error al eliminar cuenta:', error.message);
+    return res.status(500).json({ error: error.message });
   }
 };
 
@@ -407,5 +518,8 @@ module.exports = {
   socialLoginUsuario,
   obtenerPerfilUsuario,
   actualizarPerfilUsuario,
-  eliminarCuentaUsuario
+  eliminarCuentaUsuario,
+  solicitarRecuperacionPassword,
+  verificarCodigoRecuperacion,
+  restablecerPassword
 };

@@ -5,12 +5,13 @@ import { AudioModule, RecordingPresets, createAudioPlayer, setAudioModeAsync, us
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
-import { useRouter } from 'expo-router';
-import { useEffect, useRef, useState } from 'react';
+import { useFocusEffect, useRouter } from 'expo-router';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, FlatList, Image, Keyboard, KeyboardAvoidingView, Linking, Modal, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { API_URL } from '../config/api';
 import { apiFetch as fetch } from '../config/apiFetch';
+import { alCerrarSesion } from '../utils/session';
 
 const urlArchivo = (ruta) => (ruta?.startsWith('http') ? ruta : `${API_URL}${ruta}`);
 
@@ -41,7 +42,15 @@ export default function PantallaChat() {
 
   // Con teclado abierto este cubre el inset inferior; cerrado, la barra se extiende hasta el borde.
   const paddingInferiorPie = 12 + (tecladoVisible ? 0 : insets.bottom);
-  useEffect(() => {
+
+  useEffect(() => alCerrarSesion(() => {
+    setMensajes([]);
+    setIdGrupo(null);
+    setIdUsuario(null);
+  }), []);
+
+  // La pantalla sigue montada en el drawer: se reinicia en cada enfoque para no usar usuario/grupo de otra sesión.
+  useFocusEffect(useCallback(() => {
     let activo = true;
     let intervalo = null;
     let solicitudEnCurso = false;
@@ -54,16 +63,20 @@ export default function PantallaChat() {
         ]);
         if (!activo || !usuario) return;
 
-        // groupId solo se guarda al visitar otras pantallas; si falta, se resuelve desde el servidor.
+        // El grupo se consulta siempre al servidor; lo guardado solo sirve si no hay conexión.
         let grupo = grupoGuardado;
-        if (!grupo) {
+        try {
           const respuestaGrupo = await fetch(`${API_URL}/api/groups/user/${usuario}`);
-          if (!respuestaGrupo.ok) throw new Error('No se pudo obtener el grupo');
-          const datosGrupo = await respuestaGrupo.json();
-          grupo = datosGrupo.grupo?.id_grupo?.toString();
-          if (!grupo) return;
-          await AsyncStorage.setItem('groupId', grupo);
+          if (respuestaGrupo.ok) {
+            const datosGrupo = await respuestaGrupo.json();
+            grupo = datosGrupo.grupo?.id_grupo?.toString() || null;
+            if (grupo) await AsyncStorage.setItem('groupId', grupo);
+            else await AsyncStorage.removeItem('groupId');
+          }
+        } catch (error) {
+          if (!grupo) throw new Error('No se pudo conectar con el servidor');
         }
+        if (!grupo) throw new Error('Aún no perteneces a un grupo');
         if (!activo) return;
 
         setIdUsuario(Number(usuario));
@@ -75,8 +88,8 @@ export default function PantallaChat() {
           try {
             // CORREGIDO: Ruta exacta alineada con chatRoutes.js
             const respuesta = await fetch(`${API_URL}/api/chat/group/${grupo}/messages`);
-            if (!respuesta.ok) throw new Error('No se pudieron cargar los mensajes');
-            const datos = await respuesta.json();
+            const datos = await respuesta.json().catch(() => ({}));
+            if (!respuesta.ok) throw new Error(datos.error || 'No se pudieron cargar los mensajes');
             if (activo) setMensajes(datos.mensajes || []);
           } finally {
             solicitudEnCurso = false;
@@ -105,7 +118,7 @@ export default function PantallaChat() {
       audioPlayerRef.current?.remove();
       audioPlayerRef.current = null;
     };
-  }, []);
+  }, []));
   
   const agregarMensajeLocal = (mensaje) => {
     setMensajes((prev) => (prev.some((m) => m.id_mensaje === mensaje.id_mensaje) ? prev : [...prev, { ...mensaje, remitente: 'Tú', es_mio: true }]));

@@ -159,6 +159,10 @@ export default function LoginScreen() {
         <TextInput style={estilos.input} value={password} onChangeText={setPassword} secureTextEntry />
       </View>
 
+      <TouchableOpacity onPress={() => router.push('/forgot-password')} style={estilos.contenedorOlvido}>
+        <Text style={estilos.textoOlvido}>¿Olvidaste tu contraseña?</Text>
+      </TouchableOpacity>
+
       <TouchableOpacity style={estilos.botonPrimario} onPress={manejarLoginTradicional}>
         <Text style={estilos.textoBotonPrimario}>Iniciar sesión</Text>
       </TouchableOpacity>
@@ -198,5 +202,7 @@ const estilos = StyleSheet.create({
   iconoSocial: { marginRight: 12 },
   textoBotonSocial: { fontSize: 15, color: '#333333', fontWeight: '500' },
   contenedorRegistro: { alignItems: 'center', marginTop: 15 },
+  contenedorOlvido: { alignSelf: 'flex-end', marginBottom: 4 },
+  textoOlvido: { color: '#0A3D4C', fontSize: 13, fontWeight: '600' },
   textoRegistro: { color: '#0A3D4C', fontSize: 15, fontWeight: 'bold' }
 });

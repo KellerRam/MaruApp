@@ -136,6 +136,7 @@ export default function RootLayout() {
       <Drawer.Screen name="index" options={{ drawerItemStyle: { display: 'none' } }} />
       <Drawer.Screen name="login" options={{ drawerItemStyle: { display: 'none' }, swipeEnabled: false }} />
       <Drawer.Screen name="signup" options={{ drawerItemStyle: { display: 'none' }, swipeEnabled: false }} />
+      <Drawer.Screen name="forgot-password" options={{ drawerItemStyle: { display: 'none' }, swipeEnabled: false }} />
       <Drawer.Screen name="group-selection" options={{ drawerItemStyle: { display: 'none' }, swipeEnabled: false }} />
       <Drawer.Screen name="join" options={{ drawerItemStyle: { display: 'none' }, swipeEnabled: false }} />
     </Drawer>
