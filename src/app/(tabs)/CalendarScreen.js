@@ -266,6 +266,7 @@ export default function PantallaCalendario() {
       await cargarCuidadores(grupoId);
     } catch (error) {
       console.error('Error al cargar datos de la agenda:', error);
+      if (montadaRef.current) setErrorFormulario('No se pudieron cargar los datos. Revisa tu conexión e inténtalo de nuevo.');
     } finally {
       if (montadaRef.current) setCargandoDatos(false);
     }

@@ -193,6 +193,23 @@ const PROPOSITO_RESET = 'password-reset';
 
 const passwordNuevaValida = (pass) => typeof pass === 'string' && pass.length >= 8 && pass.length <= 14 && /[A-Z]/.test(pass);
 
+let tablaRecuperacionLista = false;
+const asegurarTablaRecuperacion = async () => {
+  if (tablaRecuperacionLista) return;
+  await pool.query(`CREATE TABLE IF NOT EXISTS recuperacion_password (
+    correo VARCHAR(254) PRIMARY KEY,
+    codigo_hash CHAR(64),
+    expira_en TIMESTAMPTZ NOT NULL,
+    intentos INTEGER NOT NULL DEFAULT 0 CHECK (intentos >= 0),
+    verificado_en TIMESTAMPTZ,
+    ultimo_envio TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    creado_en TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`);
+  tablaRecuperacionLista = true;
+};
+
+const detalleError = (error) => ({ mensaje: error.message, codigo: error.code, comando: error.command, respuesta: error.response, stack: error.stack });
+
 // Responde igual exista o no el correo para no revelar qué cuentas están registradas.
 const solicitarRecuperacionPassword = async (req, res) => {
   const mensajeGenerico = { mensaje: 'Si el correo está registrado, enviamos un código para restablecer la contraseña' };
@@ -205,6 +222,7 @@ const solicitarRecuperacionPassword = async (req, res) => {
     const usuario = await pool.query('SELECT id_usuario FROM Usuario WHERE LOWER(correo) = $1', [email]);
     if (usuario.rows.length === 0) return res.status(200).json(mensajeGenerico);
 
+    await asegurarTablaRecuperacion();
     const codigo = crypto.randomInt(100000, 1000000).toString();
     const codigoHash = hashCodigo(email, codigo);
     const guardado = await pool.query(
@@ -225,13 +243,14 @@ const solicitarRecuperacionPassword = async (req, res) => {
     try {
       await enviarCodigoPorCorreo(email, codigo, 'Código para restablecer tu contraseña de Maru');
     } catch (error) {
-      console.error('No se pudo enviar el código de recuperación:', error.message);
+      console.error('[recuperacion] Fallo al enviar el correo SMTP:', detalleError(error));
       await pool.query('DELETE FROM recuperacion_password WHERE correo = $1 AND codigo_hash = $2', [email, codigoHash]);
+      return res.status(503).json({ error: 'No se pudo enviar el correo. Intenta más tarde.' });
     }
     return res.status(200).json(mensajeGenerico);
   } catch (error) {
-    console.error('Error en solicitarRecuperacionPassword:', error.message);
-    return res.status(500).json({ error: 'No se pudo procesar la solicitud' });
+    console.error('[recuperacion] Error en solicitarRecuperacionPassword:', detalleError(error));
+    return res.status(error.statusCode || 500).json({ error: 'No se pudo procesar la solicitud' });
   }
 };
 

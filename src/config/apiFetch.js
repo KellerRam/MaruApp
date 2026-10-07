@@ -5,6 +5,7 @@ import { API_URL } from './api';
 
 const API_BASE = API_URL.replace(/\/+$/, '');
 let sesionExpirada = false;
+const TIEMPO_MAXIMO_MS = 20000;
 
 export const apiFetch = async (input, init = {}) => {
   const url = typeof input === 'string' ? input : input?.url;
@@ -27,7 +28,25 @@ export const apiFetch = async (input, init = {}) => {
     }
   }
 
-  const respuesta = await globalThis.fetch(input, { ...init, headers });
+  const controlador = new AbortController();
+  const temporizador = setTimeout(() => controlador.abort(), TIEMPO_MAXIMO_MS);
+  const cancelarExterno = init.signal;
+  if (cancelarExterno) {
+    if (cancelarExterno.aborted) controlador.abort();
+    else cancelarExterno.addEventListener('abort', () => controlador.abort(), { once: true });
+  }
+
+  let respuesta;
+  try {
+    respuesta = await globalThis.fetch(input, { ...init, headers, signal: controlador.signal });
+  } catch (error) {
+    if (error?.name === 'AbortError' && !cancelarExterno?.aborted) {
+      throw new Error('El servidor tardó demasiado en responder. Intenta de nuevo.');
+    }
+    throw error;
+  } finally {
+    clearTimeout(temporizador);
+  }
 
   // Con la sesión persistida, un 401 significa que el JWT caducó. Las rutas /api/auth/ usan 401 para otros fallos.
   if (respuesta.status === 401 && tokenEnviado && !url.includes('/api/auth/') && !sesionExpirada) {
