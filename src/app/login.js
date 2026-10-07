@@ -8,6 +8,7 @@ import { useState } from 'react';
 import { Alert, Image, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { API_URL } from '../config/api';
 import { apiFetch as fetch } from '../config/apiFetch';
+import { registrarDispositivoPush } from '../utils/registroPush';
 
 // Configuración inicial del SDK de Google Sign-In
 GoogleSignin.configure({
@@ -23,6 +24,7 @@ export default function LoginScreen() {
   const completarInicioSesion = async (datos) => {
     await AsyncStorage.setItem('userToken', datos.token);
     await AsyncStorage.setItem('userId', datos.idUsuario.toString());
+    registrarDispositivoPush();
 
     if (datos.tieneGrupo) {
       router.replace('/(tabs)');
@@ -202,7 +204,7 @@ const estilos = StyleSheet.create({
   iconoSocial: { marginRight: 12 },
   textoBotonSocial: { fontSize: 15, color: '#333333', fontWeight: '500' },
   contenedorRegistro: { alignItems: 'center', marginTop: 15 },
-  contenedorOlvido: { alignSelf: 'flex-end', marginBottom: 4 },
-  textoOlvido: { color: '#0A3D4C', fontSize: 13, fontWeight: '600' },
+  contenedorOlvido: { alignSelf: 'flex-end', marginBottom: 8, paddingVertical: 6 },
+  textoOlvido: { color: '#0A3D4C', fontSize: 14, fontWeight: '600', textDecorationLine: 'underline' },
   textoRegistro: { color: '#0A3D4C', fontSize: 15, fontWeight: 'bold' }
 });

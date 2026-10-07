@@ -1,11 +1,13 @@
 import { Feather, MaterialIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Notifications from 'expo-notifications';
 import { usePathname, useRouter } from 'expo-router';
 import { Drawer } from 'expo-router/drawer';
 import { useEffect, useState } from 'react';
 import { BackHandler, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { API_URL } from '../config/api';
 import { apiFetch as fetch } from '../config/apiFetch';
+import { registrarDispositivoPush } from '../utils/registroPush';
 import { alCerrarSesion, cerrarSesion } from '../utils/session';
 
 function ContenidoMenuLateral(props) {
@@ -108,6 +110,21 @@ function ContenidoMenuLateral(props) {
 export default function RootLayout() {
   const router = useRouter();
   const pathname = usePathname();
+
+  useEffect(() => {
+    if (Platform.OS === 'web') return undefined;
+
+    // Si el sistema rota el token de push, se vuelve a registrar en el servidor.
+    const tokenListener = Notifications.addPushTokenListener(() => { registrarDispositivoPush(); });
+    const respuestaListener = Notifications.addNotificationResponseReceivedListener((respuesta) => {
+      if (respuesta.notification.request.content.data?.tipo === 'chat') router.push('/ChatScreen');
+    });
+
+    return () => {
+      tokenListener.remove();
+      respuestaListener.remove();
+    };
+  }, [router]);
 
   useEffect(() => {
     if (Platform.OS !== 'android') return undefined;

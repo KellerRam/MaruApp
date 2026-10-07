@@ -5,6 +5,7 @@ import { useState } from 'react';
 import { Image, KeyboardAvoidingView, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { API_URL } from '../config/api';
 import { apiFetch as fetch } from '../config/apiFetch';
+import { registrarDispositivoPush } from '../utils/registroPush';
 
 export default function SignupScreen() {
   const router = useRouter();
@@ -117,6 +118,7 @@ export default function SignupScreen() {
       if (respuesta.ok) {
         await AsyncStorage.setItem('userToken', datos.token);
         await AsyncStorage.setItem('userId', datos.idUsuario.toString());
+        registrarDispositivoPush();
         router.push('/group-selection');
       } else {
         alert(datos.error || 'Error al guardar perfil');

@@ -1,14 +1,16 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useRouter } from 'expo-router';
-import { useEffect } from 'react';
+import { useFocusEffect, useRouter } from 'expo-router';
+import { useCallback } from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { API_URL } from '../config/api';
 import { apiFetch as fetch } from '../config/apiFetch';
+import { registrarDispositivoPush } from '../utils/registroPush';
 
 export default function Index() {
   const router = useRouter();
 
-  useEffect(() => {
+  // useFocusEffect: la pantalla sigue montada en el drawer y debe restaurar la sesión cada vez que se vuelve a '/'.
+  useFocusEffect(useCallback(() => {
     let activo = true;
 
     // La sesión vive en AsyncStorage: si hay token, se entra directo en lugar de pedir login.
@@ -21,6 +23,7 @@ export default function Index() {
         ]);
         if (token && idUsuario) {
           destino = '/(tabs)';
+          registrarDispositivoPush();
           try {
             const respuesta = await fetch(`${API_URL}/api/groups/user/${idUsuario}`);
             if (respuesta.status === 401) destino = '/login';
@@ -37,7 +40,7 @@ export default function Index() {
 
     restaurarSesion();
     return () => { activo = false; };
-  }, [router]);
+  }, [router]));
 
   return (
     <View style={estilos.contenedor}>
