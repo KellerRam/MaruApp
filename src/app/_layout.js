@@ -13,6 +13,8 @@ import { alCerrarSesion, cerrarSesion } from '../utils/session';
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
+const RUTAS_PUBLICAS = ['/', '/login', '/signup', '/forgot-password', '/join'];
+
 function ContenidoMenuLateral(props) {
   const router = useRouter();
   const pathname = usePathname();
@@ -160,6 +162,16 @@ export default function RootLayout() {
       respuestaListener.remove();
     };
   }, [router, sesionLista]);
+
+  useEffect(() => {
+    if (!sesionLista || RUTAS_PUBLICAS.includes(pathname)) return undefined;
+    let activo = true;
+    // Una ruta protegida (p. ej. abierta por notificación) sin sesión vuelve al login.
+    AsyncStorage.multiGet(['userToken', 'userId']).then((pares) => {
+      if (activo && pares.some(([, valor]) => !valor)) router.replace('/login');
+    }).catch(() => {});
+    return () => { activo = false; };
+  }, [sesionLista, pathname, router]);
 
   useEffect(() => {
     if (Platform.OS !== 'android') return undefined;
