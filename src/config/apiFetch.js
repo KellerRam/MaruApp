@@ -8,19 +8,15 @@ let sesionExpirada = false;
 const TIEMPO_MAXIMO_MS = 20000;
 
 export const apiFetch = async (input, init = {}) => {
-  // Aseguramos que la URL sea siempre una cadena limpia
-  const url = typeof input === 'string' ? input : (input?.url || '');
-  const esSolicitudAPI = url.startsWith(API_BASE) || url === API_BASE;
+  const url = typeof input === 'string' ? input : input?.url;
+  const esSolicitudAPI = typeof url === 'string' && (url === API_BASE || url.startsWith(`${API_BASE}/`));
+  if (!esSolicitudAPI) return globalThis.fetch(input, init);
 
-  if (!esSolicitudAPI) {
-    return globalThis.fetch(input, init);
-  }
-
-  // Preparamos los headers de forma segura para iOS y Android
-  const headers = new Headers(init.headers || {});
-  
-  let tokenEnviado = headers.has('Authorization');
-  if (!tokenEnviado) {
+  const headers = new Headers(typeof input === 'string' ? init.headers : input.headers);
+  new Headers(init.headers || {}).forEach((value, key) => headers.set(key, value));
+  const tieneAutorizacion = headers.has('Authorization');
+  let tokenEnviado = tieneAutorizacion;
+  if (!tieneAutorizacion) {
     try {
       const token = await AsyncStorage.getItem('userToken');
       if (token) {
@@ -32,14 +28,8 @@ export const apiFetch = async (input, init = {}) => {
     }
   }
 
-  // Añadimos Content-Type por defecto si es un método con cuerpo y no viene definido
-  if (!headers.has('Content-Type') && init.body) {
-    headers.set('Content-Type', 'application/json');
-  }
-
   const controlador = new AbortController();
   const temporizador = setTimeout(() => controlador.abort(), TIEMPO_MAXIMO_MS);
-  
   const cancelarExterno = init.signal;
   if (cancelarExterno) {
     if (cancelarExterno.aborted) controlador.abort();
@@ -48,13 +38,10 @@ export const apiFetch = async (input, init = {}) => {
 
   let respuesta;
   try {
-    // Hacemos la petición pasando la URL limpia como string y los headers normalizados
-    respuesta = await globalThis.fetch(url, {
-      ...init,
-      headers,
-      signal: controlador.signal,
-    });
+    respuesta = await globalThis.fetch(input, { ...init, headers, signal: controlador.signal });
   } catch (error) {
+    const tipo = error?.name === 'AbortError' ? 'timeout' : /Network request failed/i.test(error?.message || '') ? 'red/ATS/DNS/TLS' : 'otro';
+    console.warn(`[apiFetch] ${init.method || 'GET'} ${url} falló (${tipo}): ${error?.name}: ${error?.message}`);
     if (error?.name === 'AbortError' && !cancelarExterno?.aborted) {
       throw new Error('El servidor tardó demasiado en responder. Intenta de nuevo.');
     }
@@ -62,7 +49,9 @@ export const apiFetch = async (input, init = {}) => {
   } finally {
     clearTimeout(temporizador);
   }
+  if (!respuesta.ok) console.warn(`[apiFetch] ${init.method || 'GET'} ${url} -> HTTP ${respuesta.status}`);
 
+  // Con la sesión persistida, un 401 significa que el JWT caducó. Las rutas /api/auth/ usan 401 para otros fallos.
   if (respuesta.status === 401 && tokenEnviado && !url.includes('/api/auth/') && !sesionExpirada) {
     sesionExpirada = true;
     try {
@@ -72,6 +61,5 @@ export const apiFetch = async (input, init = {}) => {
       sesionExpirada = false;
     }
   }
-
   return respuesta;
 };
