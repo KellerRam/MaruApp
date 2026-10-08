@@ -160,11 +160,11 @@ export default function LoginScreen() {
         <Text style={estilos.etiqueta}>Contraseña</Text>
         <TextInput style={estilos.input} value={password} onChangeText={setPassword} secureTextEntry />
       </View>
-
+{/*
       <TouchableOpacity onPress={() => router.push('/forgot-password')} style={estilos.contenedorOlvido}>
         <Text style={estilos.textoOlvido}>¿Olvidaste tu contraseña?</Text>
       </TouchableOpacity>
-
+*/}
       <TouchableOpacity style={estilos.botonPrimario} onPress={manejarLoginTradicional}>
         <Text style={estilos.textoBotonPrimario}>Iniciar sesión</Text>
       </TouchableOpacity>

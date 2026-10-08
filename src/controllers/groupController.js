@@ -95,6 +95,7 @@ const obtenerMiembrosGrupo = async (req, res) => {
       `SELECT DISTINCT ON (u.id_usuario) 
               u.id_usuario,
               u.nombre_usuario AS nombre,
+              (u.correo IS NULL) AS es_manual,
               CASE WHEN p.id_usuario IS NOT NULL THEN 'paciente'
                    WHEN c.id_usuario IS NOT NULL THEN 'cuidador'
                    ELSE COALESCE(gu.rol, 'cuidador') END AS rol
@@ -276,12 +277,18 @@ const actualizarRolMiembro = async (req, res) => {
 
     await client.query('BEGIN');
     const miembroRes = await client.query(
-      'SELECT id_usuario FROM grupo_usuario WHERE id_grupo = $1 AND id_usuario = $2 FOR UPDATE',
+      'SELECT gu.id_usuario, (u.correo IS NULL) AS es_manual FROM grupo_usuario gu INNER JOIN usuario u ON u.id_usuario = gu.id_usuario WHERE gu.id_grupo = $1 AND gu.id_usuario = $2 FOR UPDATE OF gu',
       [idGrupo, idUsuario]
     );
     if (miembroRes.rows.length === 0) {
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'El usuario no pertenece a este grupo' });
+    }
+
+    // Un paciente sin celular (sin correo) no puede pasar a cuidador.
+    if (rol === 'cuidador' && miembroRes.rows[0].es_manual) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({ error: 'Un paciente sin celular no puede cambiar a cuidador' });
     }
 
     if (rol === 'paciente') {

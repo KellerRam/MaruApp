@@ -4,17 +4,17 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import * as Clipboard from 'expo-clipboard';
 import { useEffect, useRef, useState } from 'react';
 import {
-    Alert,
-    FlatList,
-    KeyboardAvoidingView,
-    Modal,
-    Platform,
-    SafeAreaView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  Alert,
+  FlatList,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  SafeAreaView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 
 import QRCode from 'react-native-qrcode-svg';
@@ -77,8 +77,8 @@ export default function PantallaGrupo() {
 
   useSincronizacion(cargarMiembros);
 
-  const cambiarRol = (id, nombre) => {
-    setMiembroParaRol({ id, nombre });
+  const cambiarRol = (id, nombre, esManual = false) => {
+    setMiembroParaRol({ id, nombre, esManual });
   };
 
   const generarInvitacion = async () => {
@@ -106,7 +106,7 @@ export default function PantallaGrupo() {
   const seleccionarTipoMiembro = () => {
     Alert.alert('Agregar miembro', 'Selecciona cómo agregarlo', [
       { text: 'Invitar por enlace', onPress: generarInvitacion },
-      { text: 'Agregar paciente manualmente', onPress: () => setMostrarPacienteManual(true) },
+      { text: 'Agregar paciente que no tiene celular', onPress: () => setMostrarPacienteManual(true) },
       { text: 'Cancelar', style: 'cancel' }
     ]);
   };
@@ -266,7 +266,7 @@ export default function PantallaGrupo() {
 
       <TouchableOpacity 
         style={estilos.botonAjustes}
-        onPress={() => cambiarRol(item.id_usuario, item.nombre)}
+        onPress={() => cambiarRol(item.id_usuario, item.nombre, Boolean(item.es_manual))}
       >
         <MaterialIcons name="more-vert" size={24} color="#555" />
       </TouchableOpacity>
@@ -310,9 +310,11 @@ export default function PantallaGrupo() {
             <TouchableOpacity style={estilos.opcionModal} onPress={() => actualizarRol(miembroParaRol.id, 'paciente')}>
               <Text style={estilos.textoOpcionModal}>Paciente</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={estilos.opcionModal} onPress={() => actualizarRol(miembroParaRol.id, 'cuidador')}>
-              <Text style={estilos.textoOpcionModal}>Cuidador</Text>
-            </TouchableOpacity>
+            {!miembroParaRol?.esManual && (
+              <TouchableOpacity style={estilos.opcionModal} onPress={() => actualizarRol(miembroParaRol.id, 'cuidador')}>
+                <Text style={estilos.textoOpcionModal}>Cuidador</Text>
+              </TouchableOpacity>
+            )}
             <TouchableOpacity style={estilos.cancelarModal} onPress={() => setMiembroParaRol(null)}>
               <Text style={estilos.textoCancelarModal}>Cancelar</Text>
             </TouchableOpacity>

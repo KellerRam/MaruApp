@@ -12,7 +12,7 @@ router.get('/user/:idUsuario', requireOwnParam(), obtenerGrupoUsuario);
 router.get('/:idGrupo/members', requireGroupMember(), obtenerMiembrosGrupo);
 router.post('/:idGrupo/patients/manual', requireOwnBody('idUsuario'), requireGroupCaregiver(), crearPacienteManual);
 router.post('/:idGrupo/invite', requireOwnBody('idUsuario'), requireGroupCaregiver(), crearInvitacionGrupo);
-router.put('/:idGrupo/members/:idUsuario/role', requireGroupCaregiver(), actualizarRolMiembro);
+router.put('/:idGrupo/members/:idUsuario/role', requireGroupMember(), actualizarRolMiembro);
 router.delete('/:idGrupo/members/:idUsuario', requireGroupCaregiver(), eliminarMiembroGrupo);
 
 module.exports = router;

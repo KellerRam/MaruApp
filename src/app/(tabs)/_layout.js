@@ -1,12 +1,15 @@
 import { Feather } from '@expo/vector-icons';
 import { Tabs, useNavigation, useRouter } from 'expo-router';
 import { StyleSheet, TouchableOpacity } from 'react-native';
+import TutorialTour from '../../components/TutorialTour';
 
 export default function TabsLayout() {
   const router = useRouter();
   const navigation = useNavigation();
 
   return (
+    <>
+    <TutorialTour />
     <Tabs
       screenOptions={{
         headerShown: true, 
@@ -71,6 +74,7 @@ export default function TabsLayout() {
         }} 
       />
     </Tabs>
+    </>
   );
 }
 
