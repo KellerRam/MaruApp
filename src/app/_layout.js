@@ -4,7 +4,7 @@ import { usePathname, useRouter } from 'expo-router';
 import { Drawer } from 'expo-router/drawer';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect, useState } from 'react';
-import { BackHandler, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, BackHandler, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { API_URL } from '../config/api';
 import { apiFetch as fetch } from '../config/apiFetch';
 import { conTiempoLimite, leerSesion, leerSesionMultiple } from '../utils/almacenSesion';
@@ -22,33 +22,41 @@ function ContenidoMenuLateral(props) {
 
   useEffect(() => {
     let cancelado = false;
-    let temporizadorReintento = null;
 
-    const cargarUsuario = async (intento = 0) => {
+    const cargarUsuario = async () => {
+      // No realizar peticiones si se está en rutas públicas o la sesión no está activa
+      if (RUTAS_PUBLICAS.includes(pathname) || cancelado) {
+        setUsuario(null);
+        return;
+      }
+
       try {
         const idUsuario = await leerSesion('userId');
-        if (!idUsuario || cancelado) return;
-        const respuesta = await fetch(`${API_URL}/api/auth/user/${idUsuario}`);
-        if (respuesta.ok) {
-          const datos = await respuesta.json();
-          if (!cancelado) setUsuario(datos.usuario);
-        }
-      } catch (error) {
-        // Reintenta una vez: el backend puede tardar en aceptar conexiones al iniciar
-        if (intento < 1 && !cancelado) {
-          temporizadorReintento = setTimeout(() => cargarUsuario(intento + 1), 1500);
+        if (!idUsuario || cancelado) {
+          if (!cancelado) setUsuario(null);
           return;
         }
-        console.error('Error al cargar el perfil en el menú:', error);
+
+        const respuesta = await conTiempoLimite(fetch(`${API_URL}/api/auth/user/${idUsuario}`), 3000, 'perfil menú');
+        if (respuesta && respuesta.ok) {
+          const datos = await respuesta.json();
+          if (!cancelado) setUsuario(datos.usuario);
+        } else if (!cancelado) {
+          setUsuario(null);
+        }
+      } catch (error) {
+        // Sin bucles de reintento: ante fallo se mantiene null para no bloquear el hilo de JSC/Hermes en iOS
+        if (!cancelado) setUsuario(null);
+        console.warn('Error al cargar el perfil en el menú:', error?.message || error);
       }
     };
 
     cargarUsuario();
+
     return () => {
       cancelado = true;
-      if (temporizadorReintento) clearTimeout(temporizadorReintento);
     };
-  }, [pathname]); // Se recarga cada vez que cambias de pantalla o abres el menú
+  }, [pathname]);
 
   useEffect(() => alCerrarSesion(() => setUsuario(null)), []);
 
@@ -88,7 +96,7 @@ function ContenidoMenuLateral(props) {
         </TouchableOpacity>
 
         <TouchableOpacity 
-          style={estilosMenu.opcionItem}
+          style={estilosMenu.opcionItem} 
           onPress={() => {
             props.navigation.closeDrawer();
             router.push('/SymptomHistoryScreen');
@@ -115,18 +123,19 @@ function ContenidoMenuLateral(props) {
 export default function RootLayout() {
   const router = useRouter();
   const pathname = usePathname();
-  const [sesionLista, setSesionLista] = useState(false);
+  const [isReady, setIsReady] = useState(false);
 
-  // Ninguna ruta se monta hasta leer las credenciales del storage; el splash sigue visible.
+  // 1. Hidratación inicial asíncrona con control estricto de timeout
   useEffect(() => {
     let activo = true;
-    // Red de seguridad: la UI nunca queda esperando indefinidamente a la hidratación.
+
+    // Respaldo de seguridad para que la UI nunca quede en blanco o colgada indefinidamente
     const respaldo = setTimeout(() => {
       if (activo) {
-        setSesionLista(true);
-        SplashScreen.hideAsync().catch(() => {});
+        setIsReady(true);
       }
-    }, 6000);
+    }, 4000);
+
     (async () => {
       try {
         await leerSesionMultiple(['userToken', 'userId', 'groupId']);
@@ -138,49 +147,78 @@ export default function RootLayout() {
               vibrationPattern: [0, 250, 250, 250],
               lightColor: '#FF231F7C',
               sound: 'default',
-            }), 4000, 'canal de notificaciones');
+            }), 3000, 'canal de notificaciones');
           }
-          const ultima = await conTiempoLimite(Notifications.getLastNotificationResponseAsync(), 4000, 'ultima notificación');
-          if (ultima?.notification.request.content.data?.tipo === 'chat') estadoNotificacionInicial.abrirChat = true;
+          const ultima = await conTiempoLimite(Notifications.getLastNotificationResponseAsync(), 3000, 'ultima notificación');
+          if (ultima?.notification?.request?.content?.data?.tipo === 'chat') {
+            estadoNotificacionInicial.abrirChat = true;
+          }
         }
       } catch (error) {
-        console.warn('No se pudo hidratar la sesión:', error.message);
+        console.warn('No se pudo hidratar la sesión inicial:', error?.message || error);
       } finally {
         clearTimeout(respaldo);
         if (activo) {
-          setSesionLista(true);
-          SplashScreen.hideAsync().catch(() => {});
+          setIsReady(true);
         }
       }
     })();
-    return () => { activo = false; clearTimeout(respaldo); };
+
+    return () => {
+      activo = false;
+      clearTimeout(respaldo);
+    };
   }, []);
 
+  // 2. Ocultar el Splash Screen únicamente cuando los componentes nativos de iOS hayan completado su montaje
   useEffect(() => {
-    if (Platform.OS === 'web' || !sesionLista) return undefined;
+    if (!isReady) return;
+    const temporizadorSplash = setTimeout(() => {
+      SplashScreen.hideAsync().catch(() => {});
+    }, 100);
+    return () => clearTimeout(temporizadorSplash);
+  }, [isReady]);
 
-    // Si el sistema rota el token de push, se vuelve a registrar en el servidor.
+  // 3. Suscripción a notificaciones push una vez que el layout está listo
+  useEffect(() => {
+    if (Platform.OS === 'web' || !isReady) return undefined;
+
     const tokenListener = Notifications.addPushTokenListener(() => { registrarDispositivoPush(); });
     const respuestaListener = Notifications.addNotificationResponseReceivedListener((respuesta) => {
-      if (respuesta.notification.request.content.data?.tipo === 'chat') router.push('/ChatScreen');
+      if (respuesta?.notification?.request?.content?.data?.tipo === 'chat') router.push('/ChatScreen');
     });
 
     return () => {
       tokenListener.remove();
       respuestaListener.remove();
     };
-  }, [router, sesionLista]);
+  }, [router, isReady]);
 
+  // 4. Protección de rutas protegidas: ejecuta la redirección de forma asíncrona fuera de la fase de render
   useEffect(() => {
-    if (!sesionLista || RUTAS_PUBLICAS.includes(pathname)) return undefined;
+    if (!isReady || RUTAS_PUBLICAS.includes(pathname)) return undefined;
     let activo = true;
-    // Una ruta protegida (p. ej. abierta por notificación) sin sesión vuelve al login.
-    leerSesionMultiple(['userToken', 'userId']).then((sesion) => {
-      if (activo && (!sesion.userToken || !sesion.userId)) router.replace('/login');
-    });
-    return () => { activo = false; };
-  }, [sesionLista, pathname, router]);
 
+    leerSesionMultiple(['userToken', 'userId'])
+      .then((sesion) => {
+        if (activo && (!sesion?.userToken || !sesion?.userId)) {
+          setTimeout(() => {
+            if (activo) router.replace('/login');
+          }, 0);
+        }
+      })
+      .catch(() => {
+        if (activo) {
+          setTimeout(() => {
+            if (activo) router.replace('/login');
+          }, 0);
+        }
+      });
+
+    return () => { activo = false; };
+  }, [isReady, pathname, router]);
+
+  // 5. Manejo del botón atrás en Android
   useEffect(() => {
     if (Platform.OS !== 'android') return undefined;
 
@@ -193,21 +231,29 @@ export default function RootLayout() {
     return () => subscription.remove();
   }, [pathname, router]);
 
-  if (!sesionLista) return null;
+  // Renderizado inicial controlado: evita null para que el árbol nativo de iOS se monte correctamente
+  if (!isReady) {
+    return (
+      <View style={estilos.contenedorCargaGlobal}>
+        <ActivityIndicator size="large" color="#60A5A3" />
+      </View>
+    );
+  }
 
   return (
     <Drawer
+      initialRouteName="index"
       drawerContent={(props) => <ContenidoMenuLateral {...props} />}
       screenOptions={{
         headerShown: false,
       }}
     >
+      <Drawer.Screen name="index" options={{ drawerItemStyle: { display: 'none' } }} />
       <Drawer.Screen name="(tabs)" options={{ drawerLabel: 'Inicio' }} />
       <Drawer.Screen name="SymptomHistoryScreen" options={{ drawerItemStyle: { display: 'none' } }} />
       <Drawer.Screen name="UserProfileScreen" options={{ drawerItemStyle: { display: 'none' } }} />
       <Drawer.Screen name="NotificationSettingsScreen" options={{ drawerItemStyle: { display: 'none' } }} />
       <Drawer.Screen name="ChatScreen" options={{ drawerItemStyle: { display: 'none' } }} />
-      <Drawer.Screen name="index" options={{ drawerItemStyle: { display: 'none' } }} />
       <Drawer.Screen name="login" options={{ drawerItemStyle: { display: 'none' }, swipeEnabled: false }} />
       <Drawer.Screen name="signup" options={{ drawerItemStyle: { display: 'none' }, swipeEnabled: false }} />
       <Drawer.Screen name="forgot-password" options={{ drawerItemStyle: { display: 'none' }, swipeEnabled: false }} />
@@ -234,5 +280,11 @@ const estilosMenu = StyleSheet.create({
 });
 
 const estilos = StyleSheet.create({
-  enlacePerfil: { marginTop: 2 }
-});
+  enlacePerfil: { marginTop: 2 },
+  contenedorCargaGlobal: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+  },
+});

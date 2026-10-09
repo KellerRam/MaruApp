@@ -1,51 +1,102 @@
 import { useFocusEffect, useRouter } from 'expo-router';
-import { useCallback } from 'react';
+import { useCallback, useRef } from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { API_URL } from '../config/api';
 import { apiFetch as fetch } from '../config/apiFetch';
-import { leerSesionMultiple } from '../utils/almacenSesion';
+import { conTiempoLimite, leerSesionMultiple } from '../utils/almacenSesion';
 import { estadoNotificacionInicial, registrarDispositivoPush } from '../utils/registroPush';
 
 export default function Index() {
   const router = useRouter();
+  const enCursoRef = useRef(false);
 
-  // useFocusEffect: la pantalla sigue montada en el drawer y debe restaurar la sesión cada vez que se vuelve a '/'.
-  useFocusEffect(useCallback(() => {
-    let activo = true;
+  // useFocusEffect: restaura la sesión de forma controlada cada vez que la pantalla gana foco
+  useFocusEffect(
+    useCallback(() => {
+      let activo = true;
 
-    // La sesión vive en AsyncStorage: si hay token, se entra directo en lugar de pedir login.
-    const restaurarSesion = async () => {
-      let destino = '/login';
-      try {
-        const { userToken: token, userId: idUsuario } = await leerSesionMultiple(['userToken', 'userId']);
-        if (token && idUsuario) {
-          destino = '/(tabs)';
-          registrarDispositivoPush();
-          try {
-            const respuesta = await fetch(`${API_URL}/api/groups/user/${idUsuario}`);
-            if (respuesta.status === 401) destino = '/login';
-            else if (respuesta.ok) destino = (await respuesta.json()).tieneGrupo ? '/(tabs)' : '/group-selection';
-          } catch {
-            // Sin conexión se conserva la sesión y se abre la app.
+      const restaurarSesion = async () => {
+        // Prevenir ejecuciones concurrentes o bucles en el hilo JS
+        if (enCursoRef.current) return;
+        enCursoRef.current = true;
+
+        let destino = '/login';
+
+        try {
+          // Lectura robusta de almacenamiento: si falla o agota tiempo, devuelve null
+          const { userToken: token, userId: idUsuario } = await leerSesionMultiple(['userToken', 'userId']);
+
+          if (token && idUsuario) {
+            destino = '/(tabs)';
+            
+            try {
+              registrarDispositivoPush();
+            } catch {
+              // Registro push silencioso sin interrumpir el flujo
+            }
+
+            // Comprobación de grupo con tiempo límite estricto (3s) para evitar carga infinita en iOS
+            try {
+              const peticionGrupo = fetch(`${API_URL}/api/groups/user/${idUsuario}`);
+              const respuesta = await conTiempoLimite(peticionGrupo, 3000, 'verificar grupo');
+              if (respuesta?.status === 401) {
+                destino = '/login';
+              } else if (respuesta?.ok) {
+                const datos = await respuesta.json();
+                destino = datos?.tieneGrupo ? '/(tabs)' : '/group-selection';
+              }
+            } catch {
+              // Sin conexión o timeout: conserva la sesión activa y entra directo a las pestañas principales
+              destino = '/(tabs)';
+            }
+          } else {
+            // Sin token o idUsuario -> ruta directa y única al login sin reintentos
+            destino = '/login';
           }
+        } catch (error) {
+          console.warn('Fallo al restaurar sesión inicial:', error?.message || error);
+          destino = '/login';
         }
-      } catch (error) {
-        console.warn('No se pudo restaurar la sesión:', error.message);
-      }
-      if (estadoNotificacionInicial.abrirChat) {
-        estadoNotificacionInicial.abrirChat = false;
-        if (activo && destino !== '/login') {
-          router.replace('/(tabs)');
-          router.push('/ChatScreen');
+
+        if (!activo) {
+          enCursoRef.current = false;
           return;
         }
-      }
-      if (activo) router.replace(destino);
-    };
 
-    restaurarSesion();
-    return () => { activo = false; };
-  }, [router]));
+        // Manejo de notificación inicial para abrir chat con transiciones desacopladas en iOS
+        if (estadoNotificacionInicial.abrirChat && destino !== '/login') {
+          estadoNotificacionInicial.abrirChat = false;
+          setTimeout(() => {
+            if (activo) {
+              router.replace('/(tabs)');
+              setTimeout(() => {
+                if (activo) {
+                  router.push('/ChatScreen');
+                  enCursoRef.current = false;
+                }
+              }, 150);
+            }
+          }, 50);
+          return;
+        }
+
+        // Redirección segura fuera de la fase de render para prevenir excepciones silenciosas en iOS
+        setTimeout(() => {
+          if (activo) {
+            router.replace(destino);
+            enCursoRef.current = false;
+          }
+        }, 50);
+      };
+
+      restaurarSesion();
+
+      return () => {
+        activo = false;
+        enCursoRef.current = false;
+      };
+    }, [router])
+  );
 
   return (
     <View style={estilos.contenedor}>
@@ -61,4 +112,4 @@ const estilos = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: '#FFFFFF',
   },
-});
+});
