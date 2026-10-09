@@ -1,10 +1,10 @@
 // src/app/signup.js
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import { Image, KeyboardAvoidingView, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { API_URL } from '../config/api';
 import { apiFetch as fetch } from '../config/apiFetch';
+import { guardarSesion } from '../utils/almacenSesion';
 import { registrarDispositivoPush } from '../utils/registroPush';
 
 export default function SignupScreen() {
@@ -116,8 +116,11 @@ export default function SignupScreen() {
       });
       const datos = await respuesta.json();
       if (respuesta.ok) {
-        await AsyncStorage.setItem('userToken', datos.token);
-        await AsyncStorage.setItem('userId', datos.idUsuario.toString());
+        const guardada = await guardarSesion([['userToken', datos.token], ['userId', datos.idUsuario.toString()]]);
+        if (!guardada) {
+          alert('No se pudo guardar la sesión en el dispositivo');
+          return;
+        }
         registrarDispositivoPush();
         router.push('/group-selection');
       } else {

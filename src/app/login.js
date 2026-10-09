@@ -1,6 +1,5 @@
 // src/app/login.js
 import { AntDesign, Ionicons } from '@expo/vector-icons';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
 import * as AppleAuthentication from 'expo-apple-authentication';
 import { useRouter } from 'expo-router';
@@ -8,6 +7,7 @@ import { useState } from 'react';
 import { Alert, Image, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { API_URL } from '../config/api';
 import { apiFetch as fetch } from '../config/apiFetch';
+import { guardarSesion } from '../utils/almacenSesion';
 import { registrarDispositivoPush } from '../utils/registroPush';
 
 // Configuración inicial del SDK de Google Sign-In
@@ -22,8 +22,8 @@ export default function LoginScreen() {
   const [password, setPassword] = useState('');
 
   const completarInicioSesion = async (datos) => {
-    await AsyncStorage.setItem('userToken', datos.token);
-    await AsyncStorage.setItem('userId', datos.idUsuario.toString());
+    const guardada = await guardarSesion([['userToken', datos.token], ['userId', datos.idUsuario.toString()]]);
+    if (!guardada) throw new Error('No se pudo guardar la sesión en el dispositivo');
     registrarDispositivoPush();
 
     if (datos.tieneGrupo) {

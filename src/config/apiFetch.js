@@ -1,5 +1,5 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
+import { leerSesion } from '../utils/almacenSesion';
 import { cerrarSesion } from '../utils/session';
 import { API_URL } from './api';
 
@@ -17,14 +17,10 @@ export const apiFetch = async (input, init = {}) => {
   const tieneAutorizacion = headers.has('Authorization');
   let tokenEnviado = tieneAutorizacion;
   if (!tieneAutorizacion) {
-    try {
-      const token = await AsyncStorage.getItem('userToken');
-      if (token) {
-        headers.set('Authorization', `Bearer ${token}`);
-        tokenEnviado = true;
-      }
-    } catch (error) {
-      console.warn('No se pudo recuperar el token de sesión:', error.message);
+    const token = await leerSesion('userToken');
+    if (token) {
+      headers.set('Authorization', `Bearer ${token}`);
+      tokenEnviado = true;
     }
   }
 

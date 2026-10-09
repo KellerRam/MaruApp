@@ -1,9 +1,9 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback } from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { API_URL } from '../config/api';
 import { apiFetch as fetch } from '../config/apiFetch';
+import { leerSesionMultiple } from '../utils/almacenSesion';
 import { estadoNotificacionInicial, registrarDispositivoPush } from '../utils/registroPush';
 
 export default function Index() {
@@ -17,10 +17,7 @@ export default function Index() {
     const restaurarSesion = async () => {
       let destino = '/login';
       try {
-        const [token, idUsuario] = await Promise.all([
-          AsyncStorage.getItem('userToken'),
-          AsyncStorage.getItem('userId'),
-        ]);
+        const { userToken: token, userId: idUsuario } = await leerSesionMultiple(['userToken', 'userId']);
         if (token && idUsuario) {
           destino = '/(tabs)';
           registrarDispositivoPush();

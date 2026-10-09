@@ -1,6 +1,5 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
-
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
+import { conTiempoLimite, limpiarSesion } from './almacenSesion';
 
 const oyentes = new Set();
 
@@ -18,9 +17,9 @@ export const cerrarSesion = async () => {
       console.warn('Error en oyente de cierre de sesión:', error.message);
     }
   });
-  await AsyncStorage.clear();
+  await limpiarSesion();
   try {
-    await GoogleSignin.signOut();
+    await conTiempoLimite(GoogleSignin.signOut(), 4000, 'cerrar sesión de Google');
   } catch (error) {
     // Sin sesión de Google activa no hay nada que cerrar.
   }

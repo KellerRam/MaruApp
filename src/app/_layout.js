@@ -1,5 +1,4 @@
 import { Feather, MaterialIcons } from '@expo/vector-icons';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Notifications from 'expo-notifications';
 import { usePathname, useRouter } from 'expo-router';
 import { Drawer } from 'expo-router/drawer';
@@ -8,6 +7,7 @@ import { useEffect, useState } from 'react';
 import { BackHandler, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { API_URL } from '../config/api';
 import { apiFetch as fetch } from '../config/apiFetch';
+import { conTiempoLimite, leerSesion, leerSesionMultiple } from '../utils/almacenSesion';
 import { estadoNotificacionInicial, registrarDispositivoPush } from '../utils/registroPush';
 import { alCerrarSesion, cerrarSesion } from '../utils/session';
 
@@ -26,7 +26,7 @@ function ContenidoMenuLateral(props) {
 
     const cargarUsuario = async (intento = 0) => {
       try {
-        const idUsuario = await AsyncStorage.getItem('userId');
+        const idUsuario = await leerSesion('userId');
         if (!idUsuario || cancelado) return;
         const respuesta = await fetch(`${API_URL}/api/auth/user/${idUsuario}`);
         if (respuesta.ok) {
@@ -120,32 +120,40 @@ export default function RootLayout() {
   // Ninguna ruta se monta hasta leer las credenciales del storage; el splash sigue visible.
   useEffect(() => {
     let activo = true;
+    // Red de seguridad: la UI nunca queda esperando indefinidamente a la hidratación.
+    const respaldo = setTimeout(() => {
+      if (activo) {
+        setSesionLista(true);
+        SplashScreen.hideAsync().catch(() => {});
+      }
+    }, 6000);
     (async () => {
       try {
-        await AsyncStorage.multiGet(['userToken', 'userId', 'groupId']);
+        await leerSesionMultiple(['userToken', 'userId', 'groupId']);
         if (Platform.OS !== 'web') {
           if (Platform.OS === 'android') {
-            await Notifications.setNotificationChannelAsync('default', {
+            await conTiempoLimite(Notifications.setNotificationChannelAsync('default', {
               name: 'Default',
               importance: Notifications.AndroidImportance.MAX,
               vibrationPattern: [0, 250, 250, 250],
               lightColor: '#FF231F7C',
               sound: 'default',
-            });
+            }), 4000, 'canal de notificaciones');
           }
-          const ultima = await Notifications.getLastNotificationResponseAsync();
+          const ultima = await conTiempoLimite(Notifications.getLastNotificationResponseAsync(), 4000, 'ultima notificación');
           if (ultima?.notification.request.content.data?.tipo === 'chat') estadoNotificacionInicial.abrirChat = true;
         }
       } catch (error) {
         console.warn('No se pudo hidratar la sesión:', error.message);
       } finally {
+        clearTimeout(respaldo);
         if (activo) {
           setSesionLista(true);
           SplashScreen.hideAsync().catch(() => {});
         }
       }
     })();
-    return () => { activo = false; };
+    return () => { activo = false; clearTimeout(respaldo); };
   }, []);
 
   useEffect(() => {
@@ -167,9 +175,9 @@ export default function RootLayout() {
     if (!sesionLista || RUTAS_PUBLICAS.includes(pathname)) return undefined;
     let activo = true;
     // Una ruta protegida (p. ej. abierta por notificación) sin sesión vuelve al login.
-    AsyncStorage.multiGet(['userToken', 'userId']).then((pares) => {
-      if (activo && pares.some(([, valor]) => !valor)) router.replace('/login');
-    }).catch(() => {});
+    leerSesionMultiple(['userToken', 'userId']).then((sesion) => {
+      if (activo && (!sesion.userToken || !sesion.userId)) router.replace('/login');
+    });
     return () => { activo = false; };
   }, [sesionLista, pathname, router]);
 
