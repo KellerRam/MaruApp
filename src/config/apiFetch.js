@@ -5,7 +5,7 @@ import { API_URL } from './api';
 
 const API_BASE = API_URL.replace(/\/+$/, '');
 let sesionExpirada = false;
-const TIEMPO_MAXIMO_MS = 20000;
+const TIEMPO_MAXIMO_MS = 80000;
 
 export const apiFetch = async (input, init = {}) => {
   const url = typeof input === 'string' ? input : input?.url;

@@ -4,14 +4,14 @@
     "slug": "appMaru",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
+    "icon": "./assets/images/icon.jpg",
     "scheme": "appmaru",
     "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.maruapp",
       "usesAppleSignIn": true,
-      "icon": "./assets/images/icon.png",
+      "icon": "./assets/images/icon.jpg",
       "entitlements": {
         "com.apple.developer.applesignin": [
           "Default"
@@ -28,7 +28,7 @@
     "android": {
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/images/icon.png",
+        "foregroundImage": "./assets/images/icon.jpg",
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/logo.png"
       },
