@@ -46,6 +46,26 @@ jobs:
 
       - run: npm ci
 
+      - name: Verificar configuración e ícono
+        run: |
+          echo "=== Configuración de Expo ==="
+          npx expo config --type public
+
+          echo "=== Verificar PNG ==="
+          test -f assets/images/icon.png
+          sips -g pixelWidth -g pixelHeight assets/images/icon.png
+
+      - name: Generar proyecto iOS y verificar AppIcon
+        run: |
+          npx expo prebuild --platform ios --clean --non-interactive
+
+          echo "=== Catálogos de íconos generados ==="
+          find ios -path '*AppIcon.appiconset*' -print
+
+          echo "=== Contenido de los catálogos ==="
+          find ios -name Contents.json -path '*AppIcon*' \
+            -exec sh -c 'echo "--- $1"; cat "$1"' _ {} \;
+
       - name: Escribir la API Key de App Store Connect
         run: |
           KEY_PATH="$RUNNER_TEMP/AuthKey.p8"

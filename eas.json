@@ -13,6 +13,7 @@
     },
     "production": {
       "ios": {
+        "image": "latest",
         "simulator": false,
         "autoIncrement": true
       },
