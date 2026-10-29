@@ -50,6 +50,8 @@ const registrarOActualizarAlerta = async ({ tipo, idUsuario, clave, pushToken, t
   return existente.rows.length ? { esNueva: false, ...existente.rows[0] } : { esNueva: true };
 };
 
+// Las alertas de bienestar se envían únicamente a usuarios con registro en la tabla paciente
+// (rol "Paciente"); el INNER JOIN con paciente es la validación de rol y no debe retirarse.
 const verificarAlertasBienestar = async () => {
   const pacientes = await pool.query(
     `SELECT p.id_usuario, p.bienestar_frecuencia, u.push_token, gu.id_grupo

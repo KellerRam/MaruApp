@@ -1,6 +1,21 @@
 // controllers/notificationController.js
 const pool = require('../config/db'); // O tu conexión a PostgreSQL
 
+// Un usuario es Paciente solo si tiene registro en la tabla paciente
+const esPaciente = async (idUsuario) => {
+  const resultado = await pool.query('SELECT 1 FROM paciente WHERE id_usuario = $1', [idUsuario]);
+  return resultado.rows.length > 0;
+};
+
+// Indica al cliente si debe mostrar/gestionar alertas de bienestar
+const obtenerRol = async (req, res) => {
+  try {
+    res.json({ es_paciente: await esPaciente(req.params.id_usuario) });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
 // Obtener preferencias de notificaciones del paciente
 const obtenerPreferencias = async (req, res) => {
   try {
@@ -31,10 +46,13 @@ const actualizarBienestar = async (req, res) => {
 
     const frecuenciaValida = Math.min(5, Math.max(1, parseInt(frecuencia, 10) || 1));
 
-    await pool.query(
+    const actualizado = await pool.query(
       'UPDATE paciente SET confirmacion_bienestar = $1, bienestar_frecuencia = $2 WHERE id_usuario = $3',
       [confirmacion_bienestar, frecuenciaValida, id_usuario]
     );
+    if (actualizado.rowCount === 0) {
+      return res.status(403).json({ error: 'Las alertas de bienestar son exclusivas para pacientes' });
+    }
 
     res.json({ mensaje: 'Preferencia de bienestar actualizada correctamente' });
   } catch (error) {
@@ -52,8 +70,20 @@ const guardarTokenPush = async (req, res) => {
       return res.status(400).json({ error: 'El token push es obligatorio' });
     }
 
+    // Un token identifica un dispositivo: se desvincula de otras cuentas para que no reciba sus alertas
+    await pool.query('UPDATE usuario SET push_token = NULL WHERE push_token = $1 AND id_usuario <> $2', [push_token, id_usuario]);
     await pool.query('UPDATE usuario SET push_token = $1 WHERE id_usuario = $2', [push_token, id_usuario]);
     res.status(200).json({ mensaje: 'Token push registrado correctamente' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// Desvincula el dispositivo al cerrar sesión
+const eliminarTokenPush = async (req, res) => {
+  try {
+    await pool.query('UPDATE usuario SET push_token = NULL WHERE id_usuario = $1', [req.params.id_usuario]);
+    res.status(200).json({ mensaje: 'Token push eliminado correctamente' });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -65,6 +95,12 @@ const confirmarAlerta = async (req, res) => {
     const { tipo, id_usuario, clave_ocurrencia } = req.body || {};
     if (!tipo || !id_usuario || !clave_ocurrencia) {
       return res.status(400).json({ error: 'tipo, id_usuario y clave_ocurrencia son obligatorios' });
+    }
+    if (!['bienestar', 'medicamento'].includes(tipo)) {
+      return res.status(400).json({ error: 'Tipo de alerta inválido' });
+    }
+    if (tipo === 'bienestar' && !(await esPaciente(id_usuario))) {
+      return res.status(403).json({ error: 'Las alertas de bienestar son exclusivas para pacientes' });
     }
 
     const resultado = await pool.query(
@@ -90,4 +126,4 @@ const confirmarAlerta = async (req, res) => {
   }
 };
 
-module.exports = { obtenerPreferencias, actualizarBienestar, guardarTokenPush, confirmarAlerta };
+module.exports = { obtenerRol, obtenerPreferencias, actualizarBienestar, guardarTokenPush, eliminarTokenPush, confirmarAlerta };

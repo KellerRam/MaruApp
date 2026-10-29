@@ -1,6 +1,7 @@
 // Envía notificaciones push usando el servicio de Expo (https://exp.host/--/api/v2/push/send)
 const EXPO_PUSH_URL = 'https://exp.host/--/api/v2/push/send';
 const TAMANIO_LOTE = 100;
+const CANAL_ANDROID = 'emergencias-canal'; // creado en el cliente (notificacionesCliente.js)
 
 const esTokenExpoValido = (token) => typeof token === 'string' && token.startsWith('ExponentPushToken');
 
@@ -8,7 +9,7 @@ const enviarPushATokens = async (tokens, { title, body, data = {}, sound = 'defa
   const tokensValidos = [...new Set((tokens || []).filter(esTokenExpoValido))];
   if (tokensValidos.length === 0) return { enviados: 0, fallidos: 0 };
 
-  const mensajes = tokensValidos.map((to) => ({ to, title, body, data, sound, priority }));
+  const mensajes = tokensValidos.map((to) => ({ to, title, body, data, sound, priority, channelId: CANAL_ANDROID }));
   let enviados = 0;
   let fallidos = 0;
 

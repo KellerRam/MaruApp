@@ -1,6 +1,6 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useEffect, useRef } from 'react';
 import { AppState } from 'react-native';
+import { obtenerToken } from '../utils/session';
 
 // Mismo intervalo que usa el chat para refrescar mensajes.
 const INTERVALO_MS = 5000;
@@ -18,7 +18,7 @@ export function useSincronizacion(recargar) {
       if (enCurso || !activo || AppState.currentState !== 'active') return;
       enCurso = true;
       try {
-        const token = await AsyncStorage.getItem('userToken');
+        const token = await obtenerToken();
         if (token && activo) await recargarRef.current();
       } catch (error) {
         console.warn('No se pudo sincronizar:', error.message);

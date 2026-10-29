@@ -1,6 +1,5 @@
 // src/app/login.js
 import { AntDesign, Ionicons } from '@expo/vector-icons';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
 import * as AppleAuthentication from 'expo-apple-authentication';
 import { useRouter } from 'expo-router';
@@ -8,6 +7,8 @@ import { useState } from 'react';
 import { Alert, Image, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { API_URL } from '../config/api';
 import { apiFetch as fetch } from '../config/apiFetch';
+import { activarNotificacionesDeSesion } from '../utils/notificacionesCliente';
+import { guardarSesion } from '../utils/session';
 
 // Configuración inicial del SDK de Google Sign-In
 GoogleSignin.configure({
@@ -21,8 +22,9 @@ export default function LoginScreen() {
   const [password, setPassword] = useState('');
 
   const completarInicioSesion = async (datos) => {
-    await AsyncStorage.setItem('userToken', datos.token);
-    await AsyncStorage.setItem('userId', datos.idUsuario.toString());
+    await guardarSesion({ token: datos.token, idUsuario: datos.idUsuario, tieneGrupo: Boolean(datos.tieneGrupo) });
+    // Sin await: no bloquea la navegación mientras el usuario responde al permiso del sistema.
+    activarNotificacionesDeSesion({ solicitarPermiso: true });
 
     if (datos.tieneGrupo) {
       router.replace('/(tabs)');

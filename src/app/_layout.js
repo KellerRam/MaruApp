@@ -6,7 +6,8 @@ import { useEffect, useState } from 'react';
 import { BackHandler, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { API_URL } from '../config/api';
 import { apiFetch as fetch } from '../config/apiFetch';
-import { alCerrarSesion, cerrarSesion } from '../utils/session';
+import { iniciarNotificaciones } from '../utils/notificacionesCliente';
+import { alCerrarSesion, alExpirarSesion, cerrarSesion } from '../utils/session';
 
 function ContenidoMenuLateral(props) {
   const router = useRouter();
@@ -108,6 +109,12 @@ function ContenidoMenuLateral(props) {
 export default function RootLayout() {
   const router = useRouter();
   const pathname = usePathname();
+
+  // Listeners globales de notificaciones (toque, rotación de token, rol del usuario).
+  useEffect(() => iniciarNotificaciones(), []);
+
+  // Si el servidor invalida la sesión, se vuelve al login en lugar de quedar con datos inválidos.
+  useEffect(() => alExpirarSesion(() => router.replace('/login')), [router]);
 
   useEffect(() => {
     if (Platform.OS !== 'android') return undefined;

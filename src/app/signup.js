@@ -1,10 +1,11 @@
 // src/app/signup.js
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import { Image, KeyboardAvoidingView, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { API_URL } from '../config/api';
 import { apiFetch as fetch } from '../config/apiFetch';
+import { activarNotificacionesDeSesion } from '../utils/notificacionesCliente';
+import { guardarSesion } from '../utils/session';
 
 export default function SignupScreen() {
   const router = useRouter();
@@ -115,8 +116,8 @@ export default function SignupScreen() {
       });
       const datos = await respuesta.json();
       if (respuesta.ok) {
-        await AsyncStorage.setItem('userToken', datos.token);
-        await AsyncStorage.setItem('userId', datos.idUsuario.toString());
+        await guardarSesion({ token: datos.token, idUsuario: datos.idUsuario, tieneGrupo: false });
+        activarNotificacionesDeSesion({ solicitarPermiso: true });
         router.push('/group-selection');
       } else {
         alert(datos.error || 'Error al guardar perfil');

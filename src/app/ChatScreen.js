@@ -11,6 +11,7 @@ import { Alert, FlatList, Image, Keyboard, KeyboardAvoidingView, Linking, Modal,
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { API_URL } from '../config/api';
 import { apiFetch as fetch } from '../config/apiFetch';
+import { obtenerToken } from '../utils/session';
 
 const urlArchivo = (ruta) => (ruta?.startsWith('http') ? ruta : `${API_URL}${ruta}`);
 
@@ -149,7 +150,7 @@ export default function PantallaChat() {
         respuesta = await fetch(url, { method: 'POST', body: formulario });
         textoRespuesta = await respuesta.text();
       } else {
-        const token = await AsyncStorage.getItem('userToken');
+        const token = await obtenerToken();
         respuesta = await FileSystem.uploadAsync(url, archivo.uri, {
           fieldName: 'archivo',
           httpMethod: 'POST',
