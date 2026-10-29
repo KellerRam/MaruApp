@@ -31,14 +31,26 @@ export const alExpirarSesion = (oyente) => {
   return () => oyentesExpiracion.delete(oyente);
 };
 
-const leerTokenAlmacenado = async () => {
-  if (usaAlmacenSeguro) {
+const esperar = (ms) => new Promise((resolver) => setTimeout(resolver, ms));
+
+// El Keychain puede rechazar lecturas de forma transitoria al arrancar la app (p. ej. antes del
+// primer desbloqueo): se reintenta antes de dar la sesión por perdida.
+const leerTokenSeguro = async () => {
+  for (let intento = 0; intento < 3; intento += 1) {
     try {
-      const token = await SecureStore.getItemAsync(CLAVE_TOKEN, opcionesSeguras);
-      if (token) return token;
+      return await SecureStore.getItemAsync(CLAVE_TOKEN, opcionesSeguras);
     } catch (error) {
       console.warn('No se pudo leer el almacén seguro:', error.message);
+      if (intento < 2) await esperar(400);
     }
+  }
+  return null;
+};
+
+const leerTokenAlmacenado = async () => {
+  if (usaAlmacenSeguro) {
+    const token = await leerTokenSeguro();
+    if (token) return token;
   }
   // Sesiones anteriores guardaban el token en AsyncStorage: se migran al almacén seguro.
   const heredado = await AsyncStorage.getItem(CLAVE_TOKEN);
