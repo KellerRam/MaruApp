@@ -120,7 +120,7 @@ export default function RootLayout() {
     if (Platform.OS !== 'android') return undefined;
 
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
-      if (pathname === '/') return false;
+      if (pathname === '/' || pathname === '/login') return false;
       router.replace('/');
       return true;
     });

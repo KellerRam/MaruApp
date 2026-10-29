@@ -11,7 +11,7 @@ import { Alert, FlatList, Image, Keyboard, KeyboardAvoidingView, Linking, Modal,
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { API_URL } from '../config/api';
 import { apiFetch as fetch } from '../config/apiFetch';
-import { obtenerToken } from '../utils/session';
+import { alCerrarSesion, alIniciarSesion, obtenerIdGrupoActivo, obtenerToken } from '../utils/session';
 
 const urlArchivo = (ruta) => (ruta?.startsWith('http') ? ruta : `${API_URL}${ruta}`);
 
@@ -46,62 +46,90 @@ export default function PantallaChat() {
     let activo = true;
     let intervalo = null;
     let solicitudEnCurso = false;
+    let generacionLocal = 0; // invalida cargas pendientes al cerrar o cambiar de sesión
+
+    const detener = () => {
+      if (intervalo) clearInterval(intervalo);
+      intervalo = null;
+      actualizarRef.current = null;
+    };
 
     const iniciar = async () => {
-      try {
-        const [usuario, grupoGuardado] = await Promise.all([
-          AsyncStorage.getItem('userId'),
-          AsyncStorage.getItem('groupId'),
-        ]);
-        if (!activo || !usuario) return;
+      detener();
+      solicitudEnCurso = false;
+      generacionLocal += 1;
+      const miGeneracion = generacionLocal;
+      const vigente = () => activo && miGeneracion === generacionLocal;
 
-        // groupId solo se guarda al visitar otras pantallas; si falta, se resuelve desde el servidor.
-        let grupo = grupoGuardado;
-        if (!grupo) {
-          const respuestaGrupo = await fetch(`${API_URL}/api/groups/user/${usuario}`);
-          if (!respuestaGrupo.ok) throw new Error('No se pudo obtener el grupo');
-          const datosGrupo = await respuestaGrupo.json();
-          grupo = datosGrupo.grupo?.id_grupo?.toString();
-          if (!grupo) return;
-          await AsyncStorage.setItem('groupId', grupo);
-        }
-        if (!activo) return;
+      try {
+        const usuario = await AsyncStorage.getItem('userId');
+        if (!vigente() || !usuario) return;
+
+        // Usa el grupo guardado o lo resuelve (y guarda) desde el servidor.
+        const grupo = await obtenerIdGrupoActivo();
+        if (!vigente() || !grupo) return;
 
         setIdUsuario(Number(usuario));
         setIdGrupo(grupo);
 
         const actualizar = async () => {
-          if (!activo || solicitudEnCurso) return;
+          if (!vigente() || solicitudEnCurso) return;
           solicitudEnCurso = true;
           try {
-            // CORREGIDO: Ruta exacta alineada con chatRoutes.js
             const respuesta = await fetch(`${API_URL}/api/chat/group/${grupo}/messages`);
+            if (respuesta.status === 403 || respuesta.status === 404) {
+              // El grupo guardado ya no es válido: se vuelve a resolver desde el servidor.
+              const vigenteEnServidor = await obtenerIdGrupoActivo({ forzar: true });
+              if (!vigente()) return;
+              if (vigenteEnServidor && vigenteEnServidor !== grupo) {
+                solicitudEnCurso = false;
+                iniciar();
+              } else if (vigenteEnServidor === null) {
+                detener();
+                setMensajes([]);
+                setIdGrupo(null);
+              }
+              return;
+            }
             if (!respuesta.ok) throw new Error('No se pudieron cargar los mensajes');
             const datos = await respuesta.json();
-            if (activo) setMensajes(datos.mensajes || []);
+            if (vigente()) setMensajes(datos.mensajes || []);
           } finally {
             solicitudEnCurso = false;
           }
         };
 
-        await actualizar();
         actualizarRef.current = actualizar;
-        if (activo) {
-          intervalo = setInterval(() => {
-            actualizar().catch((error) => {
-              if (activo) console.warn('No se pudieron actualizar los mensajes:', error.message);
-            });
-          }, 5000);
-        }
+        // El sondeo arranca aunque la primera carga falle, para que el chat se recupere solo.
+        intervalo = setInterval(() => {
+          actualizar().catch((error) => {
+            if (vigente()) console.warn('No se pudieron actualizar los mensajes:', error.message);
+          });
+        }, 5000);
+        await actualizar();
       } catch (error) {
-        if (activo) Alert.alert('No se pudo cargar el chat', error.message);
+        if (vigente()) Alert.alert('No se pudo cargar el chat', error.message);
       }
     };
+
+    // Al cerrar sesión se descarta todo lo de la cuenta anterior; al iniciar otra, se recarga.
+    const quitarCierre = alCerrarSesion(() => {
+      generacionLocal += 1;
+      detener();
+      setMensajes([]);
+      setIdGrupo(null);
+      setIdUsuario(null);
+    });
+    const quitarInicio = alIniciarSesion(() => {
+      iniciar();
+    });
 
     iniciar();
     return () => {
       activo = false;
-      if (intervalo) clearInterval(intervalo);
+      quitarCierre();
+      quitarInicio();
+      detener();
       if (audioTimeoutRef.current) clearTimeout(audioTimeoutRef.current);
       audioPlayerRef.current?.remove();
       audioPlayerRef.current = null;

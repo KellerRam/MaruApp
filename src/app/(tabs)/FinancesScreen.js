@@ -5,12 +5,12 @@ import { ActivityIndicator, Alert, Image, KeyboardAvoidingView, Modal, SafeAreaV
 import FormPickerInput from '../../components/ui/FormPickerInput';
 import { API_URL } from '../../config/api';
 import { apiFetch as fetch } from '../../config/apiFetch';
-import { useSincronizacion } from '../../hooks/use-sincronizacion';
+import { useClaveSesion, useSincronizacion } from '../../hooks/use-sincronizacion';
 
 const VACIO = { fecha: new Date().toISOString().slice(0, 10), hora: '12:00', cantidad: '', descripcion: '', comprobante: null };
 const dinero = (valor) => `Q${Number(valor || 0).toFixed(2)}`;
 
-export default function PantallaFinanzas() {
+function PantallaFinanzasContenido() {
   const montadaRef = useRef(false);
   const [grupo, setGrupo] = useState(null);
   const [usuarioActual, setUsuarioActual] = useState(null);
@@ -242,3 +242,9 @@ const estilos = StyleSheet.create({
   modalComprobante: { width: '100%', backgroundColor: '#FFF', borderRadius: 16, padding: 20, alignItems: 'center' }, 
   imagenGrande: { width: '100%', height: 350, borderRadius: 8, marginVertical: 10 }
 });
+
+// Reinicia por completo la pantalla (estado y cargas) al iniciar sesión, para no mostrar datos de otra cuenta.
+export default function PantallaFinanzas() {
+  const claveSesion = useClaveSesion();
+  return <PantallaFinanzasContenido key={claveSesion} />;
+}

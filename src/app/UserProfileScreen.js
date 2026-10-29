@@ -16,8 +16,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { API_URL } from '../config/api';
 import { apiFetch as fetch } from '../config/apiFetch';
 import { cerrarSesion } from '../utils/session';
+import { useClaveSesion } from '../hooks/use-sincronizacion';
 
-export default function UserProfileScreen() {
+function UserProfileScreenContenido() {
   const router = useRouter();
   const [cargando, setCargando] = useState(true);
   const [guardando, setGuardando] = useState(false);
@@ -364,3 +365,9 @@ const estilos = StyleSheet.create({
   inputPasswordEliminar: { borderWidth: 1, borderColor: '#888', borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10, fontSize: 16, backgroundColor: '#FFF', marginBottom: 8 },
   btnConfirmarEliminar: { backgroundColor: '#B00020', paddingVertical: 8, paddingHorizontal: 20, borderRadius: 18 },
 });
+
+// Reinicia por completo la pantalla (estado y cargas) al iniciar sesión, para no mostrar datos de otra cuenta.
+export default function UserProfileScreen() {
+  const claveSesion = useClaveSesion();
+  return <UserProfileScreenContenido key={claveSesion} />;
+}

@@ -9,6 +9,10 @@ const CLAVE_ID_USUARIO = 'userId';
 const CLAVE_TIENE_GRUPO = 'tieneGrupo';
 const CLAVE_ID_GRUPO = 'groupId';
 const API_BASE = API_URL.replace(/\/+$/, '');
+// Mensajes de requireAuth: otros 401 (p. ej. contraseña incorrecta al borrar la cuenta) no cierran la sesión.
+const MENSAJES_SESION_INVALIDA = ['Debes iniciar sesión', 'La sesión no es válida'];
+export const esErrorDeSesion = (mensaje) =>
+  typeof mensaje === 'string' && MENSAJES_SESION_INVALIDA.some((inicio) => mensaje.startsWith(inicio));
 
 // En Android (Keystore) e iOS (Keychain) el token vive en el almacén seguro nativo.
 // En web no existe, por lo que se usa AsyncStorage como alternativa.
@@ -16,7 +20,14 @@ const usaAlmacenSeguro = Platform.OS !== 'web';
 const opcionesSeguras = { keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK };
 
 const oyentes = new Set();
+const oyentesInicio = new Set();
 const oyentesExpiracion = new Set();
+
+// Estado en memoria: evita leer el Keychain en cada petición HTTP. Se invalida de forma síncrona
+// al cerrar sesión; `generacion` descarta lecturas/escrituras pendientes de una sesión anterior.
+let tokenEnMemoria = null;
+let lecturaEnCurso = null;
+let generacion = 0;
 let cerrandoPorExpiracion = false;
 
 // Permite que componentes montados descarten su estado en memoria al cerrar sesión.
@@ -25,10 +36,26 @@ export const alCerrarSesion = (oyente) => {
   return () => oyentes.delete(oyente);
 };
 
+// Permite que componentes que siguen montados (Drawer/Tabs) recarguen sus datos al iniciar sesión.
+export const alIniciarSesion = (oyente) => {
+  oyentesInicio.add(oyente);
+  return () => oyentesInicio.delete(oyente);
+};
+
 // Permite a la navegación reaccionar cuando el servidor invalida la sesión (token vencido).
 export const alExpirarSesion = (oyente) => {
   oyentesExpiracion.add(oyente);
   return () => oyentesExpiracion.delete(oyente);
+};
+
+const notificar = (conjunto, etiqueta) => {
+  conjunto.forEach((oyente) => {
+    try {
+      oyente();
+    } catch (error) {
+      console.warn(`Error en oyente de ${etiqueta}:`, error.message);
+    }
+  });
 };
 
 const esperar = (ms) => new Promise((resolver) => setTimeout(resolver, ms));
@@ -81,17 +108,35 @@ const tokenVencido = (token) => {
   return typeof exp === 'number' && exp * 1000 <= Date.now();
 };
 
+// Token de la sesión activa. Responde desde memoria; solo la primera vez (o tras reiniciar la app)
+// lee el almacén seguro, y las lecturas simultáneas comparten una sola consulta.
 export const obtenerToken = async () => {
-  try {
-    return await leerTokenAlmacenado();
-  } catch (error) {
-    console.warn('No se pudo recuperar el token de sesión:', error.message);
-    return null;
+  if (tokenEnMemoria) return tokenEnMemoria;
+  if (!lecturaEnCurso) {
+    const generacionLectura = generacion;
+    lecturaEnCurso = leerTokenAlmacenado()
+      .then((token) => {
+        if (generacionLectura !== generacion) return null; // se cerró/abrió sesión mientras se leía
+        if (token) tokenEnMemoria = token;
+        return token;
+      })
+      .catch((error) => {
+        console.warn('No se pudo recuperar el token de sesión:', error.message);
+        return null;
+      })
+      .finally(() => {
+        if (generacionLectura === generacion) lecturaEnCurso = null;
+      });
   }
+  return lecturaEnCurso;
 };
 
 export const guardarSesion = async ({ token, idUsuario, tieneGrupo = false }) => {
   cerrandoPorExpiracion = false;
+  generacion += 1;
+  lecturaEnCurso = null;
+  tokenEnMemoria = token; // las peticiones inmediatas ya salen autenticadas
+
   let guardadoSeguro = false;
   if (usaAlmacenSeguro) {
     try {
@@ -107,6 +152,7 @@ export const guardarSesion = async ({ token, idUsuario, tieneGrupo = false }) =>
     [CLAVE_ID_USUARIO, String(idUsuario)],
     [CLAVE_TIENE_GRUPO, tieneGrupo ? 'true' : 'false'],
   ]);
+  notificar(oyentesInicio, 'inicio de sesión');
 };
 
 // Devuelve la sesión persistida o null si no existe, está incompleta o el token ya venció.
@@ -123,6 +169,51 @@ export const obtenerSesion = async () => {
     return null;
   }
   return { token, idUsuario, tieneGrupo: tieneGrupoGuardado === 'true' || Boolean(idGrupo) };
+};
+
+// Grupo del usuario autenticado: primero el guardado localmente y, si no existe (p. ej. tras
+// iniciar sesión o restaurarla), se resuelve desde el servidor y se guarda para el resto de pantallas.
+// Con `forzar` siempre consulta al servidor (para detectar que el usuario salió del grupo).
+// Devuelve el id (string), null si el servidor confirma que no tiene grupo, o undefined si no se pudo saber.
+export const obtenerIdGrupoActivo = async ({ forzar = false } = {}) => {
+  const [[, idUsuario], [, guardado]] = await AsyncStorage.multiGet([CLAVE_ID_USUARIO, CLAVE_ID_GRUPO]);
+  if (!idUsuario) return undefined;
+  if (guardado && !forzar) return guardado;
+
+  const token = await obtenerToken();
+  if (!token) return undefined;
+  const generacionConsulta = generacion;
+  const controlador = new AbortController();
+  const temporizador = setTimeout(() => controlador.abort(), 15000);
+  try {
+    const respuesta = await globalThis.fetch(`${API_BASE}/api/groups/user/${idUsuario}`, {
+      headers: { Authorization: `Bearer ${token}` },
+      signal: controlador.signal,
+    });
+    if (!respuesta.ok) {
+      if (respuesta.status === 401) {
+        const datos = await respuesta.json().catch(() => null);
+        if (esErrorDeSesion(datos?.error)) expirarSesion(token);
+      }
+      return forzar && guardado ? guardado : undefined;
+    }
+    const datos = await respuesta.json();
+    if (generacionConsulta !== generacion) return undefined; // la sesión cambió mientras se consultaba
+    const idGrupo = datos.grupo?.id_grupo?.toString();
+    if (idGrupo) {
+      await AsyncStorage.setItem(CLAVE_ID_GRUPO, idGrupo);
+      return idGrupo;
+    }
+    // Sin grupo: se descarta el id guardado para no usar uno obsoleto
+    await AsyncStorage.multiRemove([CLAVE_ID_GRUPO]);
+    await AsyncStorage.setItem(CLAVE_TIENE_GRUPO, 'false');
+    return null;
+  } catch (error) {
+    console.warn('No se pudo resolver el grupo del usuario:', error.message);
+    return forzar && guardado ? guardado : undefined;
+  } finally {
+    clearTimeout(temporizador);
+  }
 };
 
 // Desvincula el dispositivo del usuario para que no reciba alertas de una cuenta ya cerrada.
@@ -143,47 +234,42 @@ const desregistrarTokenPush = async (idUsuario, token) => {
   }
 };
 
+// Limpieza local inmediata (memoria → listeners → almacenamiento); la red nunca bloquea el logout.
 export const cerrarSesion = async ({ notificarServidor = true } = {}) => {
-  oyentes.forEach((oyente) => {
-    try {
-      oyente();
-    } catch (error) {
-      console.warn('Error en oyente de cierre de sesión:', error.message);
-    }
+  // Datos necesarios para avisar al servidor, capturados antes de borrar nada.
+  let tokenPrevio = tokenEnMemoria;
+  let idUsuarioPrevio = null;
+  if (notificarServidor) {
+    tokenPrevio = tokenPrevio || (await obtenerToken());
+    idUsuarioPrevio = await AsyncStorage.getItem(CLAVE_ID_USUARIO).catch(() => null);
+  }
+
+  // 1) Síncrono: ninguna petición posterior vuelve a salir con el token anterior.
+  generacion += 1;
+  tokenEnMemoria = null;
+  lecturaEnCurso = null;
+
+  // 2) Los componentes montados descartan su estado y detienen sus sondeos.
+  notificar(oyentes, 'cierre de sesión');
+
+  // 3) Almacenamiento persistente.
+  const borrados = [AsyncStorage.clear()];
+  if (usaAlmacenSeguro) borrados.push(SecureStore.deleteItemAsync(CLAVE_TOKEN, opcionesSeguras));
+  const resultados = await Promise.allSettled(borrados);
+  resultados.forEach((resultado) => {
+    if (resultado.status === 'rejected') console.warn('No se pudo limpiar la sesión:', resultado.reason?.message);
   });
 
-  if (notificarServidor) {
-    const [token, idUsuario] = await Promise.all([obtenerToken(), AsyncStorage.getItem(CLAVE_ID_USUARIO)]);
-    await desregistrarTokenPush(idUsuario, token);
-  }
-
-  if (usaAlmacenSeguro) {
-    try {
-      await SecureStore.deleteItemAsync(CLAVE_TOKEN, opcionesSeguras);
-    } catch (error) {
-      console.warn('No se pudo borrar el token seguro:', error.message);
-    }
-  }
-  await AsyncStorage.clear();
-  try {
-    await GoogleSignin.signOut();
-  } catch (error) {
-    // Sin sesión de Google activa no hay nada que cerrar.
-  }
+  // 4) Tareas en segundo plano que no deben retrasar el cierre de sesión.
+  GoogleSignin.signOut().catch(() => {});
+  if (notificarServidor) desregistrarTokenPush(idUsuarioPrevio, tokenPrevio);
 };
 
 // El servidor rechazó el token (401): se limpia la sesión una sola vez y se avisa a la navegación.
 export const expirarSesion = async (tokenRechazado) => {
   if (cerrandoPorExpiracion) return;
-  const tokenActual = await obtenerToken();
-  if (!tokenActual || tokenActual !== tokenRechazado) return; // ya hubo un nuevo inicio de sesión
+  if (!tokenRechazado || tokenEnMemoria !== tokenRechazado) return; // ya hubo un nuevo inicio de sesión
   cerrandoPorExpiracion = true;
   await cerrarSesion({ notificarServidor: false });
-  oyentesExpiracion.forEach((oyente) => {
-    try {
-      oyente();
-    } catch (error) {
-      console.warn('Error en oyente de expiración de sesión:', error.message);
-    }
-  });
+  notificar(oyentesExpiracion, 'expiración de sesión');
 };

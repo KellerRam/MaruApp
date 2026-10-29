@@ -19,7 +19,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import FormPickerInput from '../components/ui/FormPickerInput';
 import { API_URL } from '../config/api';
 import { apiFetch as fetch } from '../config/apiFetch';
-import { useSincronizacion } from '../hooks/use-sincronizacion';
+import { useClaveSesion, useSincronizacion } from '../hooks/use-sincronizacion';
 
 const NOMBRES_MESES = [
   'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
@@ -47,7 +47,7 @@ const filtrarSintomas = (lista, tipo) => {
   return lista;
 };
 
-export default function SymptomHistoryScreen() {
+function SymptomHistoryScreenContenido() {
   const router = useRouter();
   const [sintomas, setSintomas] = useState([]);
   const [sintomasFiltrados, setSintomasFiltrados] = useState([]);
@@ -316,3 +316,9 @@ const estilos = StyleSheet.create({
   botonCancelar: { paddingVertical: 10, alignItems: 'center' },
   textoBotonCancelar: { color: '#666' },
 });
+
+// Reinicia por completo la pantalla (estado y cargas) al iniciar sesión, para no mostrar datos de otra cuenta.
+export default function SymptomHistoryScreen() {
+  const claveSesion = useClaveSesion();
+  return <SymptomHistoryScreenContenido key={claveSesion} />;
+}

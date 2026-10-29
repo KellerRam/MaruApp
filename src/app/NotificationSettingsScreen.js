@@ -17,6 +17,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { API_URL } from '../config/api';
 import { apiFetch as fetch } from '../config/apiFetch';
 import { registrarNotificacionesPush, sincronizarRolUsuario } from '../utils/notificacionesCliente';
+import { useClaveSesion } from '../hooks/use-sincronizacion';
 
 // Umbral de fuerza (en g, restando la gravedad) para considerar una sacudida "muy brusca"
 const UMBRAL_SACUDIDA = 2.6;
@@ -24,7 +25,7 @@ const LECTURAS_CONSECUTIVAS_REQUERIDAS = 3;
 const VENTANA_LECTURAS_MS = 900;
 const ENFRIAMIENTO_MS = 15000;
 
-export default function NotificationSettingsScreen() {
+function NotificationSettingsScreenContenido() {
   const router = useRouter();
   const montadaRef = useRef(false);
   
@@ -440,3 +441,9 @@ const estilos = StyleSheet.create({
   botonPermiso: { backgroundColor: '#008B8B', borderRadius: 15, paddingVertical: 8, alignItems: 'center' },
   textoBotonPermiso: { color: '#FFF', fontSize: 13, fontWeight: '600' },
 });
+
+// Reinicia por completo la pantalla (estado y cargas) al iniciar sesión, para no mostrar datos de otra cuenta.
+export default function NotificationSettingsScreen() {
+  const claveSesion = useClaveSesion();
+  return <NotificationSettingsScreenContenido key={claveSesion} />;
+}

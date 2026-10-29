@@ -20,9 +20,9 @@ import {
 import QRCode from 'react-native-qrcode-svg';
 import { API_URL } from '../../config/api';
 import { apiFetch as fetch } from '../../config/apiFetch';
-import { useSincronizacion } from '../../hooks/use-sincronizacion';
+import { useClaveSesion, useSincronizacion } from '../../hooks/use-sincronizacion';
 
-export default function PantallaGrupo() {
+function PantallaGrupoContenido() {
   const montadaRef = useRef(false);
   const [miembros, setMiembros] = useState([]);
   const [idGrupo, setIdGrupo] = useState(null);
@@ -492,3 +492,9 @@ const estilos = StyleSheet.create({
   cancelarModal: { padding: 10, alignItems: 'center' },
   textoCancelarModal: { color: '#666', fontSize: 14 },
 });
+
+// Reinicia por completo la pantalla (estado y cargas) al iniciar sesión, para no mostrar datos de otra cuenta.
+export default function PantallaGrupo() {
+  const claveSesion = useClaveSesion();
+  return <PantallaGrupoContenido key={claveSesion} />;
+}

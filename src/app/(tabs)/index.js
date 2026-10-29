@@ -5,6 +5,7 @@ import { Alert, AppState, KeyboardAvoidingView, Modal, SafeAreaView, ScrollView,
 import FormPickerInput from '../../components/ui/FormPickerInput';
 import { API_URL } from '../../config/api';
 import { apiFetch as fetch } from '../../config/apiFetch';
+import { useClaveSesion } from '../../hooks/use-sincronizacion';
 
 const horaSinSegundos = (hora) => String(hora || '').slice(0, 5);
 
@@ -37,7 +38,7 @@ const ESCALA_ANIMO = [
   { valor: 'muy_bien', emoji: '😄', etiqueta: 'Muy bien' },
 ];
 
-export default function PantallaInicio() {
+function PantallaInicioContenido() {
   const pathname = usePathname();
   const [datosPantalla, setDatosPantalla] = useState({
     cuidadorActual: 'Cargando...',
@@ -617,3 +618,9 @@ const estilos = StyleSheet.create({
     fontWeight: '600',
   },
 });
+
+// Reinicia por completo la pantalla (estado y cargas) al iniciar sesión, para no mostrar datos de otra cuenta.
+export default function PantallaInicio() {
+  const claveSesion = useClaveSesion();
+  return <PantallaInicioContenido key={claveSesion} />;
+}
