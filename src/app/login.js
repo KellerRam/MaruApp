@@ -8,7 +8,7 @@ import { Alert, Image, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, T
 import { API_URL } from '../config/api';
 import { apiFetch as fetch } from '../config/apiFetch';
 import { activarNotificacionesDeSesion } from '../utils/notificacionesCliente';
-import { guardarSesion, obtenerIdGrupoActivo } from '../utils/session';
+import { guardarSesion } from '../utils/session';
 
 // Configuración inicial del SDK de Google Sign-In
 GoogleSignin.configure({
@@ -24,8 +24,7 @@ export default function LoginScreen() {
   const completarInicioSesion = async (datos) => {
     await guardarSesion({ token: datos.token, idUsuario: datos.idUsuario, tieneGrupo: Boolean(datos.tieneGrupo) });
     // Sin await: no bloquea la navegación mientras el usuario responde al permiso del sistema.
-    activarNotificacionesDeSesion({ solicitarPermiso: true });
-    if (datos.tieneGrupo) obtenerIdGrupoActivo();
+    activarNotificacionesDeSesion();
 
     if (datos.tieneGrupo) {
       router.replace('/(tabs)');

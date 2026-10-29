@@ -6,9 +6,9 @@ import { KeyboardAvoidingView, ScrollView, StyleSheet, Text, TextInput, Touchabl
 import FormPickerInput from '../components/ui/FormPickerInput';
 import { API_URL } from '../config/api';
 import { apiFetch as fetch } from '../config/apiFetch';
-import { useClaveSesion, useSincronizacion } from '../hooks/use-sincronizacion';
+import { useSincronizacion } from '../hooks/use-sincronizacion';
 
-function ManageOperationsScreenContenido() {
+export default function ManageOperationsScreen() {
   const montadaRef = useRef(false);
   const ahora = new Date();
   const fechaHoyISO = `${ahora.getFullYear()}-${String(ahora.getMonth() + 1).padStart(2, '0')}-${String(ahora.getDate()).padStart(2, '0')}`;
@@ -279,9 +279,3 @@ const estilos = StyleSheet.create({
   btnGuardar: { backgroundColor: '#60A5A3', padding: 14, borderRadius: 20, alignItems: 'center', marginTop: 10 },
   txtBtnGuardar: { color: '#FFF', fontSize: 16, fontWeight: 'bold' }
 });
-
-// Reinicia por completo la pantalla (estado y cargas) al iniciar sesión, para no mostrar datos de otra cuenta.
-export default function ManageOperationsScreen() {
-  const claveSesion = useClaveSesion();
-  return <ManageOperationsScreenContenido key={claveSesion} />;
-}

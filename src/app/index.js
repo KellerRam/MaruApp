@@ -2,29 +2,23 @@ import { useRouter } from 'expo-router';
 import { useEffect } from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { activarNotificacionesDeSesion } from '../utils/notificacionesCliente';
-import { obtenerIdGrupoActivo, obtenerSesion } from '../utils/session';
+import { cargarSesionGuardada } from '../utils/session';
 
 export default function Index() {
   const router = useRouter();
 
-  // Restaura la sesión persistida y redirige una sola vez según su estado.
+  // Restaura la sesión guardada y redirige una sola vez. La lectura tiene tiempo límite: la pantalla
+  // de carga nunca se queda esperando indefinidamente.
   useEffect(() => {
     let cancelado = false;
 
     const restaurarSesion = async () => {
       let destino = '/login';
       try {
-        const sesion = await obtenerSesion();
+        const sesion = await cargarSesionGuardada();
         if (sesion) {
           destino = sesion.tieneGrupo ? '/(tabs)' : '/group-selection';
-          activarNotificacionesDeSesion({ solicitarPermiso: false });
-          // Deja listo el grupo para el chat y el calendario sin bloquear la navegación.
-          // Confirma en segundo plano que el usuario sigue en un grupo (pudo salir desde otro dispositivo).
-          if (sesion.tieneGrupo) {
-            obtenerIdGrupoActivo({ forzar: true }).then((idGrupo) => {
-              if (idGrupo === null) router.replace('/group-selection');
-            });
-          }
+          activarNotificacionesDeSesion();
         }
       } catch (error) {
         console.warn('No se pudo restaurar la sesión:', error.message);

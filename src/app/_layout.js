@@ -110,17 +110,17 @@ export default function RootLayout() {
   const router = useRouter();
   const pathname = usePathname();
 
-  // Listeners globales de notificaciones (toque, rotación de token, rol del usuario).
+  // Mantiene registrado el token push del dispositivo (rotación del token) mientras haya sesión.
   useEffect(() => iniciarNotificaciones(), []);
 
-  // Si el servidor invalida la sesión, se vuelve al login en lugar de quedar con datos inválidos.
+  // Si el servidor invalida la sesión (token vencido), se vuelve al login.
   useEffect(() => alExpirarSesion(() => router.replace('/login')), [router]);
 
   useEffect(() => {
     if (Platform.OS !== 'android') return undefined;
 
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
-      if (pathname === '/' || pathname === '/login') return false;
+      if (pathname === '/') return false;
       router.replace('/');
       return true;
     });

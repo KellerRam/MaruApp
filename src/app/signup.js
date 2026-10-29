@@ -117,7 +117,7 @@ export default function SignupScreen() {
       const datos = await respuesta.json();
       if (respuesta.ok) {
         await guardarSesion({ token: datos.token, idUsuario: datos.idUsuario, tieneGrupo: false });
-        activarNotificacionesDeSesion({ solicitarPermiso: true });
+        activarNotificacionesDeSesion();
         router.push('/group-selection');
       } else {
         alert(datos.error || 'Error al guardar perfil');

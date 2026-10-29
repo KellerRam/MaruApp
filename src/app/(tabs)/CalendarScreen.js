@@ -19,8 +19,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import FormPickerInput from '../../components/ui/FormPickerInput';
 import { API_URL } from '../../config/api';
 import { apiFetch as fetch } from '../../config/apiFetch';
-import { useClaveSesion, useSincronizacion } from '../../hooks/use-sincronizacion';
-import { obtenerIdGrupoActivo } from '../../utils/session';
+import { useSincronizacion } from '../../hooks/use-sincronizacion';
 
 const NOMBRES_MESES = [
   'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
@@ -106,7 +105,7 @@ const generarLoteMeses = (mesInicio, anioInicio, cantidadMeses = 12) => {
   return resultado;
 };
 
-function PantallaCalendarioContenido() {
+export default function PantallaCalendario() {
   const montadaRef = useRef(false);
   const [fechaActual, setFechaActual] = useState(new Date());
 
@@ -407,13 +406,7 @@ function PantallaCalendarioContenido() {
   const manejarGuardarHorario = async () => {
     setErrorFormulario('');
 
-    // Si la carga inicial aún no terminó (p. ej. tras restaurar la sesión), se resuelve el grupo aquí.
-    let grupoActivo = idGrupo;
-    if (!grupoActivo) {
-      grupoActivo = await obtenerIdGrupoActivo();
-      if (grupoActivo) setIdGrupo(grupoActivo);
-    }
-    if (!grupoActivo) {
+    if (!idGrupo) {
       setErrorFormulario('No se encontró el Grupo asignado');
       return;
     }
@@ -499,7 +492,7 @@ function PantallaCalendarioContenido() {
 
         endpoint = `${API_URL}/api/schedules/cuidado`;
         bodyData = {
-          id_grupo: grupoActivo,
+          id_grupo: idGrupo,
           id_cuidador: cuidadorNum,
           fecha_inicio: fechaFormulario,
           fecha_fin: fechaFinStr,
@@ -514,7 +507,7 @@ function PantallaCalendarioContenido() {
         }
         endpoint = `${API_URL}/api/schedules/medicamento`;
         bodyData = {
-          id_grupo: grupoActivo,
+          id_grupo: idGrupo,
           nombre_medicamento: nombreMed.trim(),
           dosis: dosisMed.trim(),
           presentacion: presentacionMed.trim(),
@@ -547,7 +540,7 @@ function PantallaCalendarioContenido() {
           endpoint = `${API_URL}/api/schedules/cuidado/${registroEditando.id_horario_cuidado}`;
           const { inicio, fin } = calcularFechasTurno();
           bodyData = {
-            id_grupo: grupoActivo,
+            id_grupo: idGrupo,
             id_cuidador: Number(encargadoCuidado),
             fecha_inicio: fechaFormulario,
             fecha_fin: `${fin.getFullYear()}-${String(fin.getMonth() + 1).padStart(2, '0')}-${String(fin.getDate()).padStart(2, '0')}`,
@@ -1611,9 +1604,3 @@ const estilos = StyleSheet.create({
     marginBottom: 2,
   }
 });
-
-// Reinicia por completo la pantalla (estado y cargas) al iniciar sesión, para no mostrar datos de otra cuenta.
-export default function PantallaCalendario() {
-  const claveSesion = useClaveSesion();
-  return <PantallaCalendarioContenido key={claveSesion} />;
-}

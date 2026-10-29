@@ -5,7 +5,6 @@ import { Alert, AppState, KeyboardAvoidingView, Modal, SafeAreaView, ScrollView,
 import FormPickerInput from '../../components/ui/FormPickerInput';
 import { API_URL } from '../../config/api';
 import { apiFetch as fetch } from '../../config/apiFetch';
-import { useClaveSesion } from '../../hooks/use-sincronizacion';
 
 const horaSinSegundos = (hora) => String(hora || '').slice(0, 5);
 
@@ -38,7 +37,7 @@ const ESCALA_ANIMO = [
   { valor: 'muy_bien', emoji: '😄', etiqueta: 'Muy bien' },
 ];
 
-function PantallaInicioContenido() {
+export default function PantallaInicio() {
   const pathname = usePathname();
   const [datosPantalla, setDatosPantalla] = useState({
     cuidadorActual: 'Cargando...',
@@ -143,22 +142,10 @@ function PantallaInicioContenido() {
       }
     };
 
-    // Evita acumular peticiones simultáneas cuando el servidor tarda en responder.
-    let resumenEnCurso = false;
-    const cargarSinSolapar = async () => {
-      if (resumenEnCurso) return;
-      resumenEnCurso = true;
-      try {
-        await cargarResumen();
-      } finally {
-        resumenEnCurso = false;
-      }
-    };
-
-    cargarSinSolapar();
+    cargarResumen();
 
     const intervalo = setInterval(() => {
-      if (AppState.currentState === 'active') cargarSinSolapar();
+      if (AppState.currentState === 'active') cargarResumen();
     }, 5000);
 
     return () => {
@@ -630,9 +617,3 @@ const estilos = StyleSheet.create({
     fontWeight: '600',
   },
 });
-
-// Reinicia por completo la pantalla (estado y cargas) al iniciar sesión, para no mostrar datos de otra cuenta.
-export default function PantallaInicio() {
-  const claveSesion = useClaveSesion();
-  return <PantallaInicioContenido key={claveSesion} />;
-}

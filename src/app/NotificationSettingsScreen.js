@@ -1,11 +1,13 @@
 import { Feather } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import Constants from 'expo-constants';
 import * as Notifications from 'expo-notifications';
 import { useRouter } from 'expo-router';
 import { Accelerometer } from 'expo-sensors';
 import { useEffect, useRef, useState } from 'react';
 import {
     Alert,
+    Platform,
     ScrollView,
     StyleSheet,
     Switch,
@@ -16,8 +18,6 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { API_URL } from '../config/api';
 import { apiFetch as fetch } from '../config/apiFetch';
-import { registrarNotificacionesPush, sincronizarRolUsuario } from '../utils/notificacionesCliente';
-import { useClaveSesion } from '../hooks/use-sincronizacion';
 
 // Umbral de fuerza (en g, restando la gravedad) para considerar una sacudida "muy brusca"
 const UMBRAL_SACUDIDA = 2.6;
@@ -25,11 +25,19 @@ const LECTURAS_CONSECUTIVAS_REQUERIDAS = 3;
 const VENTANA_LECTURAS_MS = 900;
 const ENFRIAMIENTO_MS = 15000;
 
-function NotificationSettingsScreenContenido() {
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowBanner: true,
+    shouldShowList: true,
+    shouldPlaySound: true,
+    shouldSetBadge: true,
+  }),
+});
+
+export default function NotificationSettingsScreen() {
   const router = useRouter();
   const montadaRef = useRef(false);
   
-  const [esPaciente, setEsPaciente] = useState(false);
   const [alertaBienestar, setAlertaBienestar] = useState(false);
   const [expandidoBienestar, setExpandidoBienestar] = useState(false);
   const [frecuenciaBienestar, setFrecuenciaBienestar] = useState(1);
@@ -57,12 +65,6 @@ function NotificationSettingsScreenContenido() {
         const idUsuario = await AsyncStorage.getItem('userId');
         if (!idUsuario || !montadaRef.current) return;
 
-        // Las alertas de bienestar solo existen para usuarios con rol Paciente
-        const paciente = await sincronizarRolUsuario();
-        if (!montadaRef.current) return;
-        setEsPaciente(paciente);
-        if (!paciente) return;
-
         const respuesta = await fetch(`${API_URL}/api/notifications/preferences/${idUsuario}`);
         if (!montadaRef.current) return;
         if (respuesta.ok) {
@@ -76,6 +78,30 @@ function NotificationSettingsScreenContenido() {
       }
     };
     cargarConfiguracion();
+  }, []);
+
+  // Marca la alerta como "leída" cuando el paciente toca la notificación (detiene reintentos/escalada)
+  useEffect(() => {
+    const confirmarDesdeNotificacion = async (data) => {
+      if (!data?.tipo || !data?.clave_ocurrencia) return;
+      try {
+        const idUsuario = await AsyncStorage.getItem('userId');
+        if (!idUsuario) return;
+        const respuesta = await fetch(`${API_URL}/api/notifications/confirmar`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tipo: data.tipo, id_usuario: idUsuario, clave_ocurrencia: data.clave_ocurrencia }),
+        });
+        if (!respuesta.ok) throw new Error('No se pudo confirmar la alerta');
+      } catch (error) {
+        console.error('Error al confirmar alerta:', error);
+      }
+    };
+
+    const suscripcion = Notifications.addNotificationResponseReceivedListener((respuesta) => {
+      confirmarDesdeNotificacion(respuesta.notification.request.content.data);
+    });
+    return () => suscripcion.remove();
   }, []);
 
   // Detección de sacudida muy brusca mediante el acelerómetro (requiere varias lecturas
@@ -170,6 +196,29 @@ function NotificationSettingsScreenContenido() {
     if (!valor) setExpandidoBienestar(false);
   };
 
+const registrarTokenPush = async () => {
+    try {
+      const idUsuario = await AsyncStorage.getItem('userId');
+      if (!idUsuario) return;
+
+      const projectId = Constants?.expoConfig?.extra?.eas?.projectId ?? Constants?.easConfig?.projectId;
+      if (!projectId) {
+        console.warn('No hay projectId de EAS configurado: no se puede obtener el token de push de Expo.');
+        return;
+      }
+
+      const token = (await Notifications.getExpoPushTokenAsync({ projectId })).data;
+      const respuesta = await fetch(`${API_URL}/api/notifications/push-token/${idUsuario}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ push_token: token }),
+      });
+      if (!respuesta.ok) throw new Error('El servidor rechazó el token push');
+    } catch (error) {
+      console.warn('No se pudo registrar el token push:', error.message);
+    }
+  };
+
 const solicitarPermisosNotificacion = async () => {
     try {
       const { status: existingStatus } = await Notifications.getPermissionsAsync();
@@ -199,7 +248,17 @@ const solicitarPermisosNotificacion = async () => {
         return;
       }
 
-      await registrarNotificacionesPush({ solicitarPermiso: false });
+      if (Platform.OS === 'android') {
+        await Notifications.setNotificationChannelAsync('emergencias-canal', {
+          name: 'Alertas de Emergencia y Bienestar',
+          importance: Notifications.AndroidImportance.MAX,
+          vibrationPattern: [0, 250, 250, 250],
+          lightColor: '#FF231F7C',
+          sound: 'default',
+        });
+      }
+
+      await registrarTokenPush();
 
       Alert.alert(
         '¡Éxito!',
@@ -235,59 +294,57 @@ const solicitarPermisosNotificacion = async () => {
       </View>
 
       {/* ALERTA DE BIENESTAR */}
-      {esPaciente && (
-        <View style={estilos.tarjetaSeccion}>
-          <View style={estilos.filaPrincipal}>
-            <Text style={estilos.textoTitulo}>ALERTA DE BIENESTAR</Text>
-            <View style={estilos.contenedorControles}>
-              <Switch
-                trackColor={{ false: '#767577', true: '#0A3D4C' }}
-                thumbColor={'#f4f3f4'}
-                value={alertaBienestar}
-                onValueChange={guardarConfirmacionBienestar}
+      <View style={estilos.tarjetaSeccion}>
+        <View style={estilos.filaPrincipal}>
+          <Text style={estilos.textoTitulo}>ALERTA DE BIENESTAR</Text>
+          <View style={estilos.contenedorControles}>
+            <Switch
+              trackColor={{ false: '#767577', true: '#0A3D4C' }}
+              thumbColor={'#f4f3f4'}
+              value={alertaBienestar}
+              onValueChange={guardarConfirmacionBienestar}
+            />
+            <TouchableOpacity 
+              disabled={!alertaBienestar}
+              onPress={() => setExpandidoBienestar(!expandidoBienestar)}
+              style={[estilos.botonFlecha, !alertaBienestar && estilos.opcionBloqueada]}
+            >
+              <Feather 
+                name={expandidoBienestar ? "chevron-up" : "chevron-down"} 
+                size={22} 
+                color={alertaBienestar ? "#111" : "#AAA"} 
               />
-              <TouchableOpacity 
-                disabled={!alertaBienestar}
-                onPress={() => setExpandidoBienestar(!expandidoBienestar)}
-                style={[estilos.botonFlecha, !alertaBienestar && estilos.opcionBloqueada]}
-              >
-                <Feather 
-                  name={expandidoBienestar ? "chevron-up" : "chevron-down"} 
-                  size={22} 
-                  color={alertaBienestar ? "#111" : "#AAA"} 
-                />
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {expandidoBienestar && alertaBienestar && (
+          <View style={estilos.subOpciones}>
+            <Text style={estilos.subTextoLabel}>Frecuencia al día (Máx. 5 - Intervalos de 4 hrs):</Text>
+            <View style={estilos.filaFrecuencia}>
+              <TouchableOpacity style={estilos.btnContador} onPress={() => cambiarFrecuencia(-1)}>
+                <Text style={estilos.txtContador}>-</Text>
+              </TouchableOpacity>
+              <Text style={estilos.valorFrecuencia}>{frecuenciaBienestar}</Text>
+              <TouchableOpacity style={estilos.btnContador} onPress={() => cambiarFrecuencia(1)}>
+                <Text style={estilos.txtContador}>+</Text>
               </TouchableOpacity>
             </View>
-          </View>
 
-          {expandidoBienestar && alertaBienestar && (
-            <View style={estilos.subOpciones}>
-              <Text style={estilos.subTextoLabel}>Frecuencia al día (Máx. 5 - Intervalos de 4 hrs):</Text>
-              <View style={estilos.filaFrecuencia}>
-                <TouchableOpacity style={estilos.btnContador} onPress={() => cambiarFrecuencia(-1)}>
-                  <Text style={estilos.txtContador}>-</Text>
-                </TouchableOpacity>
-                <Text style={estilos.valorFrecuencia}>{frecuenciaBienestar}</Text>
-                <TouchableOpacity style={estilos.btnContador} onPress={() => cambiarFrecuencia(1)}>
-                  <Text style={estilos.txtContador}>+</Text>
-                </TouchableOpacity>
-              </View>
-
-              {Array.from({ length: frecuenciaBienestar }).map((_, index) => (
-                <View key={index} style={estilos.cajaHora}>
-                  <Text style={estilos.txtHoraLabel}>Alerta {index + 1}:</Text>
-                  <View style={estilos.selectorHoraFicticio}>
-                    <Text style={estilos.txtHoraSeleccionada}>
-                      {index === 0 ? '08:00 AM' : index === 1 ? '12:00 PM' : index === 2 ? '04:00 PM' : index === 3 ? '07:00 PM' : '10:00 PM'}
-                    </Text>
-                    <Feather name="clock" size={16} color="#555" />
-                  </View>
+            {Array.from({ length: frecuenciaBienestar }).map((_, index) => (
+              <View key={index} style={estilos.cajaHora}>
+                <Text style={estilos.txtHoraLabel}>Alerta {index + 1}:</Text>
+                <View style={estilos.selectorHoraFicticio}>
+                  <Text style={estilos.txtHoraSeleccionada}>
+                    {index === 0 ? '08:00 AM' : index === 1 ? '12:00 PM' : index === 2 ? '04:00 PM' : index === 3 ? '07:00 PM' : '10:00 PM'}
+                  </Text>
+                  <Feather name="clock" size={16} color="#555" />
                 </View>
-              ))}
-            </View>
-          )}
-        </View>
-      )}
+              </View>
+            ))}
+          </View>
+        )}
+      </View>
 
       {/* RECORDATORIOS DE MEDICAMENTOS */}
       <View style={estilos.tarjetaSeccion}>
@@ -441,9 +498,3 @@ const estilos = StyleSheet.create({
   botonPermiso: { backgroundColor: '#008B8B', borderRadius: 15, paddingVertical: 8, alignItems: 'center' },
   textoBotonPermiso: { color: '#FFF', fontSize: 13, fontWeight: '600' },
 });
-
-// Reinicia por completo la pantalla (estado y cargas) al iniciar sesión, para no mostrar datos de otra cuenta.
-export default function NotificationSettingsScreen() {
-  const claveSesion = useClaveSesion();
-  return <NotificationSettingsScreenContenido key={claveSesion} />;
-}
