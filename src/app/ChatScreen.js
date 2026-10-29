@@ -108,7 +108,11 @@ export default function PantallaChat() {
         }, 5000);
         await actualizar();
       } catch (error) {
-        if (vigente()) Alert.alert('No se pudo cargar el chat', error.message);
+        const esFalloDeRed = /cancel|abort|network|timed? ?out|failed to fetch/i.test(`${error?.name} ${error?.message}`);
+        if (vigente()) {
+          if (esFalloDeRed) console.warn('Carga del chat interrumpida, se reintentará:', error.message);
+          else Alert.alert('No se pudo cargar el chat', error.message);
+        }
       }
     };
 

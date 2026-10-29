@@ -143,10 +143,22 @@ function PantallaInicioContenido() {
       }
     };
 
-    cargarResumen();
+    // Evita acumular peticiones simultáneas cuando el servidor tarda en responder.
+    let resumenEnCurso = false;
+    const cargarSinSolapar = async () => {
+      if (resumenEnCurso) return;
+      resumenEnCurso = true;
+      try {
+        await cargarResumen();
+      } finally {
+        resumenEnCurso = false;
+      }
+    };
+
+    cargarSinSolapar();
 
     const intervalo = setInterval(() => {
-      if (AppState.currentState === 'active') cargarResumen();
+      if (AppState.currentState === 'active') cargarSinSolapar();
     }, 5000);
 
     return () => {
