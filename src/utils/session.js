@@ -154,6 +154,13 @@ const desregistrarTokenPush = (previa) => {
     .finally(() => clearTimeout(temporizador));
 };
 
+// Borra todo lo guardado salvo el aviso de tutorial ya visto (para no repetirlo en cada inicio de sesión).
+const PREFIJO_TUTORIAL_VISTO = 'tutorialVisto_';
+const limpiarAlmacenamiento = async () => {
+  const claves = await AsyncStorage.getAllKeys();
+  await AsyncStorage.multiRemove(claves.filter((clave) => !clave.startsWith(PREFIJO_TUTORIAL_VISTO)));
+};
+
 // Cierre inmediato: primero memoria, luego pantallas, luego almacenamiento; la red va en segundo plano.
 export const cerrarSesion = async ({ notificarServidor = true } = {}) => {
   const previa = sesion;
@@ -163,7 +170,7 @@ export const cerrarSesion = async ({ notificarServidor = true } = {}) => {
 
   notificar(oyentes, 'cierre de sesión');
 
-  await conLimite(AsyncStorage.clear(), LIMITE_ALMACENAMIENTO_MS);
+  await conLimite(limpiarAlmacenamiento(), LIMITE_ALMACENAMIENTO_MS);
 
   GoogleSignin.signOut().catch(() => {
     // Sin sesión de Google activa no hay nada que cerrar.

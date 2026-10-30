@@ -77,8 +77,8 @@ export default function PantallaGrupo() {
 
   useSincronizacion(cargarMiembros);
 
-  const cambiarRol = (id, nombre) => {
-    setMiembroParaRol({ id, nombre });
+  const cambiarRol = (id, nombre, sinDispositivo = false) => {
+    setMiembroParaRol({ id, nombre, sinDispositivo });
   };
 
   const generarInvitacion = async () => {
@@ -106,7 +106,7 @@ export default function PantallaGrupo() {
   const seleccionarTipoMiembro = () => {
     Alert.alert('Agregar miembro', 'Selecciona cómo agregarlo', [
       { text: 'Invitar por enlace', onPress: generarInvitacion },
-      { text: 'Agregar paciente manualmente', onPress: () => setMostrarPacienteManual(true) },
+      { text: 'Agregar paciente que no cuenta con dispositivo móvil', onPress: () => setMostrarPacienteManual(true) },
       { text: 'Cancelar', style: 'cancel' }
     ]);
   };
@@ -266,7 +266,7 @@ export default function PantallaGrupo() {
 
       <TouchableOpacity 
         style={estilos.botonAjustes}
-        onPress={() => cambiarRol(item.id_usuario, item.nombre)}
+        onPress={() => cambiarRol(item.id_usuario, item.nombre, Boolean(item.sin_dispositivo))}
       >
         <MaterialIcons name="more-vert" size={24} color="#555" />
       </TouchableOpacity>
@@ -310,9 +310,15 @@ export default function PantallaGrupo() {
             <TouchableOpacity style={estilos.opcionModal} onPress={() => actualizarRol(miembroParaRol.id, 'paciente')}>
               <Text style={estilos.textoOpcionModal}>Paciente</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={estilos.opcionModal} onPress={() => actualizarRol(miembroParaRol.id, 'cuidador')}>
-              <Text style={estilos.textoOpcionModal}>Cuidador</Text>
-            </TouchableOpacity>
+            {miembroParaRol?.sinDispositivo ? (
+              <Text style={estilos.enlaceInvitacion}>
+                Este paciente no cuenta con dispositivo móvil, por lo que no puede ser cuidador.
+              </Text>
+            ) : (
+              <TouchableOpacity style={estilos.opcionModal} onPress={() => actualizarRol(miembroParaRol.id, 'cuidador')}>
+                <Text style={estilos.textoOpcionModal}>Cuidador</Text>
+              </TouchableOpacity>
+            )}
             <TouchableOpacity style={estilos.cancelarModal} onPress={() => setMiembroParaRol(null)}>
               <Text style={estilos.textoCancelarModal}>Cancelar</Text>
             </TouchableOpacity>
@@ -352,7 +358,7 @@ export default function PantallaGrupo() {
         <KeyboardAvoidingView style={estilos.fondoModal} behavior="padding">
           <View style={estilos.modalInvitacion}>
             <Text style={estilos.tituloModal}>Agregar paciente</Text>
-            <Text style={estilos.enlaceInvitacion}>Este perfil no requiere correo ni acceso desde un celular.</Text>
+            <Text style={estilos.enlaceInvitacion}>Este paciente no cuenta con dispositivo móvil: no requiere correo ni acceso desde un celular.</Text>
             <TextInput
               style={estilos.entradaPaciente}
               placeholder="Nombre completo"

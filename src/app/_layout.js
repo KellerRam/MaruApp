@@ -9,6 +9,9 @@ import { apiFetch as fetch } from '../config/apiFetch';
 import { iniciarNotificaciones } from '../utils/notificacionesCliente';
 import { alCerrarSesion, alExpirarSesion, cerrarSesion } from '../utils/session';
 
+// Pantallas con sesión iniciada que no pertenecen a (tabs)
+const MODULOS_FUERA_DE_TABS = ['/ChatScreen', '/SymptomHistoryScreen', '/UserProfileScreen', '/NotificationSettingsScreen', '/manage-schedules'];
+
 function ContenidoMenuLateral(props) {
   const router = useRouter();
   const pathname = usePathname();
@@ -121,7 +124,8 @@ export default function RootLayout() {
 
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
       if (pathname === '/') return false;
-      router.replace('/');
+      // Los módulos fuera de (tabs) vuelven directo al inicio de las pestañas (pasar por '/' dejaba la pantalla cargando)
+      router.replace(MODULOS_FUERA_DE_TABS.includes(pathname) ? '/(tabs)' : '/');
       return true;
     });
 
@@ -143,6 +147,7 @@ export default function RootLayout() {
       <Drawer.Screen name="index" options={{ drawerItemStyle: { display: 'none' } }} />
       <Drawer.Screen name="login" options={{ drawerItemStyle: { display: 'none' }, swipeEnabled: false }} />
       <Drawer.Screen name="signup" options={{ drawerItemStyle: { display: 'none' }, swipeEnabled: false }} />
+      <Drawer.Screen name="forgot-password" options={{ drawerItemStyle: { display: 'none' }, swipeEnabled: false }} />
       <Drawer.Screen name="group-selection" options={{ drawerItemStyle: { display: 'none' }, swipeEnabled: false }} />
       <Drawer.Screen name="join" options={{ drawerItemStyle: { display: 'none' }, swipeEnabled: false }} />
     </Drawer>

@@ -4,11 +4,12 @@ const TAMANIO_LOTE = 100;
 
 const esTokenExpoValido = (token) => typeof token === 'string' && token.startsWith('ExponentPushToken');
 
-const enviarPushATokens = async (tokens, { title, body, data = {}, sound = 'default', priority = 'high' }) => {
+// categoryId (opcional): categoría de notificación registrada en la app (botones de acción).
+const enviarPushATokens = async (tokens, { title, body, data = {}, sound = 'default', priority = 'high', categoryId }) => {
   const tokensValidos = [...new Set((tokens || []).filter(esTokenExpoValido))];
   if (tokensValidos.length === 0) return { enviados: 0, fallidos: 0 };
 
-  const mensajes = tokensValidos.map((to) => ({ to, title, body, data, sound, priority }));
+  const mensajes = tokensValidos.map((to) => ({ to, title, body, data, sound, priority, ...(categoryId ? { categoryId } : {}) }));
   let enviados = 0;
   let fallidos = 0;
 

@@ -1,12 +1,19 @@
 // controllers/notificationController.js
-const pool = require('../config/db'); // O tu conexión a PostgreSQL
+const pool = require('../config/db');
+const { enviarPushATokens } = require('../utils/pushNotifications');
+const { normalizarHorarios, obtenerHorariosPaciente, MAXIMO_ALERTAS_POR_DIA } = require('../utils/horariosBienestar');
+
+const MINUTOS_LIMITE_BIENESTAR = 180;
+
+const horaLocalTexto = (fecha) =>
+  `${String(fecha.getHours()).padStart(2, '0')}:${String(fecha.getMinutes()).padStart(2, '0')}`;
 
 // Obtener preferencias de notificaciones del paciente
 const obtenerPreferencias = async (req, res) => {
   try {
     const { id_usuario } = req.params;
     const resultado = await pool.query(
-      'SELECT confirmacion_bienestar, bienestar_frecuencia FROM paciente WHERE id_usuario = $1',
+      'SELECT confirmacion_bienestar, bienestar_frecuencia, bienestar_horarios FROM paciente WHERE id_usuario = $1',
       [id_usuario]
     );
 
@@ -14,29 +21,46 @@ const obtenerPreferencias = async (req, res) => {
       return res.status(404).json({ error: 'Paciente no encontrado' });
     }
 
+    const horarios = obtenerHorariosPaciente(resultado.rows[0]);
     res.json({
       confirmacion_bienestar: resultado.rows[0].confirmacion_bienestar,
-      frecuencia: resultado.rows[0].bienestar_frecuencia || 1,
+      frecuencia: horarios.length,
+      horarios,
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 };
 
-// Actualizar confirmacion_bienestar y la frecuencia diaria de alertas
+// Actualizar confirmacion_bienestar y las horas diarias de alerta (máximo 5)
 const actualizarBienestar = async (req, res) => {
   try {
     const { id_usuario } = req.params;
-    const { confirmacion_bienestar, frecuencia } = req.body;
+    const { confirmacion_bienestar, frecuencia, horarios } = req.body || {};
 
-    const frecuenciaValida = Math.min(5, Math.max(1, parseInt(frecuencia, 10) || 1));
+    let horariosGuardados;
+    if (horarios !== undefined) {
+      horariosGuardados = normalizarHorarios(horarios);
+      if (!horariosGuardados) {
+        return res.status(400).json({ error: `Indica de 1 a ${MAXIMO_ALERTAS_POR_DIA} horas válidas (HH:MM) sin repetir` });
+      }
+    } else {
+      // Compatibilidad: solo se envió la cantidad de alertas
+      const cantidad = Math.min(MAXIMO_ALERTAS_POR_DIA, Math.max(1, parseInt(frecuencia, 10) || 1));
+      horariosGuardados = obtenerHorariosPaciente({ bienestar_horarios: null, bienestar_frecuencia: cantidad });
+    }
 
-    await pool.query(
-      'UPDATE paciente SET confirmacion_bienestar = $1, bienestar_frecuencia = $2 WHERE id_usuario = $3',
-      [confirmacion_bienestar, frecuenciaValida, id_usuario]
+    const actualizado = await pool.query(
+      `UPDATE paciente
+       SET confirmacion_bienestar = $1, bienestar_frecuencia = $2, bienestar_horarios = $3
+       WHERE id_usuario = $4 RETURNING id_usuario`,
+      [Boolean(confirmacion_bienestar), horariosGuardados.length, horariosGuardados.join(','), id_usuario]
     );
+    if (actualizado.rows.length === 0) {
+      return res.status(403).json({ error: 'Solo el paciente puede configurar la alerta de bienestar' });
+    }
 
-    res.json({ mensaje: 'Preferencia de bienestar actualizada correctamente' });
+    res.json({ mensaje: 'Preferencia de bienestar actualizada correctamente', horarios: horariosGuardados });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -52,6 +76,8 @@ const guardarTokenPush = async (req, res) => {
       return res.status(400).json({ error: 'El token push es obligatorio' });
     }
 
+    // Un dispositivo pertenece a una sola cuenta: se desvincula de cualquier otra que lo tuviera
+    await pool.query('UPDATE usuario SET push_token = NULL WHERE push_token = $1 AND id_usuario <> $2', [push_token, id_usuario]);
     await pool.query('UPDATE usuario SET push_token = $1 WHERE id_usuario = $2', [push_token, id_usuario]);
     res.status(200).json({ mensaje: 'Token push registrado correctamente' });
   } catch (error) {
@@ -59,7 +85,79 @@ const guardarTokenPush = async (req, res) => {
   }
 };
 
-// Marca una alerta (bienestar o medicamento) como leída/confirmada, deteniendo los reintentos
+// Al cerrar sesión el dispositivo deja de recibir las notificaciones de esa cuenta
+const eliminarTokenPush = async (req, res) => {
+  try {
+    await pool.query('UPDATE usuario SET push_token = NULL WHERE id_usuario = $1', [req.params.id_usuario]);
+    res.status(200).json({ mensaje: 'Token push eliminado' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// Cualquier miembro del grupo puede pedir al paciente que confirme su bienestar
+const solicitarAlertaBienestar = async (req, res) => {
+  try {
+    const idGrupo = Number(req.body?.id_grupo);
+    if (!Number.isInteger(idGrupo) || idGrupo <= 0) {
+      return res.status(400).json({ error: 'El grupo es obligatorio' });
+    }
+
+    const pacienteRes = await pool.query(
+      `SELECT u.id_usuario, u.nombre_usuario, u.push_token, u.correo
+       FROM grupo_usuario gu
+       INNER JOIN usuario u ON u.id_usuario = gu.id_usuario
+       LEFT JOIN paciente p ON p.id_usuario = gu.id_usuario
+       WHERE gu.id_grupo = $1 AND (p.id_usuario IS NOT NULL OR gu.rol = 'paciente')
+       LIMIT 1`,
+      [idGrupo]
+    );
+    if (pacienteRes.rows.length === 0) {
+      return res.status(409).json({ error: 'El grupo no tiene un paciente asignado' });
+    }
+
+    const paciente = pacienteRes.rows[0];
+    if (!paciente.correo || typeof paciente.push_token !== 'string' || !paciente.push_token.startsWith('ExponentPushToken')) {
+      return res.status(409).json({ error: 'El paciente no cuenta con un dispositivo con notificaciones activas' });
+    }
+
+    const pendiente = await pool.query(
+      `SELECT 1 FROM alerta_notificacion
+       WHERE tipo = 'bienestar' AND id_usuario = $1 AND leida = false
+         AND primer_envio > CURRENT_TIMESTAMP - ($2::int * INTERVAL '1 minute')
+       LIMIT 1`,
+      [paciente.id_usuario, MINUTOS_LIMITE_BIENESTAR]
+    );
+    if (pendiente.rows.length > 0) {
+      return res.status(409).json({ error: 'Ya hay una alerta de bienestar pendiente de confirmar' });
+    }
+
+    const clave = `manual-${Date.now()}`;
+    await pool.query(
+      `INSERT INTO alerta_notificacion (tipo, id_usuario, clave_ocurrencia) VALUES ('bienestar', $1, $2)`,
+      [paciente.id_usuario, clave]
+    );
+
+    const entrega = await enviarPushATokens([paciente.push_token], {
+      title: 'Alerta de bienestar',
+      body: 'Toca para confirmar que estás bien.',
+      data: { tipo: 'bienestar', clave_ocurrencia: clave },
+      categoryId: 'bienestar',
+    });
+    if (entrega.enviados === 0) {
+      await pool.query(`DELETE FROM alerta_notificacion WHERE tipo = 'bienestar' AND clave_ocurrencia = $1`, [clave]);
+      return res.status(502).json({ error: 'No se pudo enviar la notificación al paciente. Intenta de nuevo.' });
+    }
+
+    res.status(200).json({ mensaje: 'Alerta de bienestar enviada al paciente' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// Confirma una alerta y detiene los reintentos.
+// - bienestar: solo la confirma el paciente al que se le envió; se avisa en el chat del grupo.
+// - medicamento: la confirma cualquier miembro del grupo.
 const confirmarAlerta = async (req, res) => {
   try {
     const { tipo, id_usuario, clave_ocurrencia } = req.body || {};
@@ -67,27 +165,68 @@ const confirmarAlerta = async (req, res) => {
       return res.status(400).json({ error: 'tipo, id_usuario y clave_ocurrencia son obligatorios' });
     }
 
-    const resultado = await pool.query(
-      `UPDATE alerta_notificacion SET leida = true
-       WHERE tipo = $1 AND id_usuario = $2 AND clave_ocurrencia = $3
-       RETURNING id_alerta`,
-      [tipo, id_usuario, clave_ocurrencia]
-    );
-
-    if (resultado.rows.length === 0) {
-      // Si aún no existía un registro (confirmación anticipada), se crea ya marcado como leído
-      await pool.query(
-        `INSERT INTO alerta_notificacion (tipo, id_usuario, clave_ocurrencia, leida)
-         VALUES ($1, $2, $3, true)
-         ON CONFLICT (tipo, id_usuario, clave_ocurrencia) DO UPDATE SET leida = true`,
-        [tipo, id_usuario, clave_ocurrencia]
+    if (tipo === 'bienestar') {
+      const confirmada = await pool.query(
+        `UPDATE alerta_notificacion SET leida = true
+         WHERE tipo = 'bienestar' AND id_usuario = $1 AND clave_ocurrencia = $2 AND leida = false
+         RETURNING id_alerta`,
+        [id_usuario, clave_ocurrencia]
       );
+
+      if (confirmada.rows.length === 0) {
+        const existe = await pool.query(
+          `SELECT 1 FROM alerta_notificacion WHERE tipo = 'bienestar' AND id_usuario = $1 AND clave_ocurrencia = $2`,
+          [id_usuario, clave_ocurrencia]
+        );
+        if (existe.rows.length === 0) {
+          return res.status(404).json({ error: 'La alerta no existe o no está dirigida a ti' });
+        }
+        return res.status(200).json({ mensaje: 'La alerta ya estaba confirmada', yaConfirmada: true });
+      }
+
+      const grupoRes = await pool.query('SELECT id_grupo FROM grupo_usuario WHERE id_usuario = $1 LIMIT 1', [id_usuario]);
+      if (grupoRes.rows.length > 0) {
+        await pool.query(
+          `INSERT INTO chat_mensaje (id_grupo, id_usuario, tipo, texto) VALUES ($1, $2, 'texto', $3)`,
+          [grupoRes.rows[0].id_grupo, id_usuario, `✅ El paciente confirmó su bienestar a las ${horaLocalTexto(new Date())}.`]
+        );
+      }
+      return res.status(200).json({ mensaje: 'Bienestar confirmado' });
     }
 
-    res.status(200).json({ mensaje: 'Alerta confirmada' });
+    if (tipo === 'medicamento') {
+      const coincidencia = /^hm-(\d+)$/.exec(String(clave_ocurrencia));
+      if (!coincidencia) return res.status(400).json({ error: 'La clave de la toma no es válida' });
+
+      const pertenece = await pool.query(
+        `SELECT 1 FROM horario_medicamento hm
+         INNER JOIN medicamento m ON m.id_medicamento = hm.id_medicamento
+         INNER JOIN grupo_usuario gu ON gu.id_grupo = m.id_grupo
+         WHERE hm.id_horario_medicamento = $1 AND gu.id_usuario = $2`,
+        [coincidencia[1], id_usuario]
+      );
+      if (pertenece.rows.length === 0) {
+        return res.status(403).json({ error: 'Esta toma no pertenece a tu grupo' });
+      }
+
+      await pool.query(
+        `UPDATE alerta_notificacion SET leida = true WHERE tipo = 'medicamento' AND clave_ocurrencia = $1`,
+        [clave_ocurrencia]
+      );
+      return res.status(200).json({ mensaje: 'Toma confirmada' });
+    }
+
+    return res.status(400).json({ error: 'Tipo de alerta no válido' });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 };
 
-module.exports = { obtenerPreferencias, actualizarBienestar, guardarTokenPush, confirmarAlerta };
+module.exports = {
+  obtenerPreferencias,
+  actualizarBienestar,
+  guardarTokenPush,
+  eliminarTokenPush,
+  solicitarAlertaBienestar,
+  confirmarAlerta,
+};

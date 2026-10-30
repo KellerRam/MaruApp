@@ -97,7 +97,8 @@ const obtenerMiembrosGrupo = async (req, res) => {
               u.nombre_usuario AS nombre,
               CASE WHEN p.id_usuario IS NOT NULL THEN 'paciente'
                    WHEN c.id_usuario IS NOT NULL THEN 'cuidador'
-                   ELSE COALESCE(gu.rol, 'cuidador') END AS rol
+                   ELSE COALESCE(gu.rol, 'cuidador') END AS rol,
+              (u.correo IS NULL) AS sin_dispositivo
        FROM grupo_usuario gu
        INNER JOIN usuario u ON gu.id_usuario = u.id_usuario
        LEFT JOIN paciente p ON p.id_usuario = u.id_usuario
@@ -282,6 +283,18 @@ const actualizarRolMiembro = async (req, res) => {
     if (miembroRes.rows.length === 0) {
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'El usuario no pertenece a este grupo' });
+    }
+
+    if (rol === 'cuidador') {
+      // Un paciente creado sin dispositivo móvil (sin correo) no tiene cómo iniciar sesión como cuidador
+      const sinDispositivoRes = await client.query(
+        'SELECT 1 FROM usuario WHERE id_usuario = $1 AND correo IS NULL',
+        [idUsuario]
+      );
+      if (sinDispositivoRes.rows.length > 0) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: 'Un paciente sin dispositivo móvil no puede ser cuidador' });
+      }
     }
 
     if (rol === 'paciente') {

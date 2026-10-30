@@ -2,7 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 import * as Device from 'expo-device';
 import * as Notifications from 'expo-notifications';
-import { Platform } from 'react-native';
+import { Alert, Platform } from 'react-native';
 import { API_URL } from '../config/api';
 import { apiFetch as fetch } from '../config/apiFetch';
 import { alCerrarSesion, conLimite, obtenerToken } from './session';
@@ -93,14 +93,115 @@ const ejecutarRegistro = async ({ solicitarPermiso = true } = {}) => {
 // Se invoca al iniciar sesión, al registrarse y al restaurar la sesión guardada.
 export const activarNotificacionesDeSesion = () => registrarNotificacionesPush({ solicitarPermiso: true });
 
-// Si el sistema rota el token push, se vuelve a registrar (solo con sesión activa).
+// ---------------------------------------------------------------------------
+// Respuesta a las notificaciones de bienestar y medicamentos
+// - Bienestar: con tocar la notificación (o su botón) el paciente confirma que está bien.
+// - Medicamento: el botón "Confirmar toma" confirma; al tocar la notificación se pide confirmar.
+// ---------------------------------------------------------------------------
+const ACCION_CONFIRMAR = 'confirmar';
+const CLAVE_ULTIMA_RESPUESTA = 'ultimaRespuestaNotificacion';
+
+const registrarCategorias = async () => {
+  try {
+    await Notifications.setNotificationCategoryAsync('bienestar', [
+      { identifier: ACCION_CONFIRMAR, buttonTitle: 'Estoy bien', options: { opensAppToForeground: true } },
+    ]);
+    await Notifications.setNotificationCategoryAsync('medicamento', [
+      { identifier: ACCION_CONFIRMAR, buttonTitle: 'Confirmar toma', options: { opensAppToForeground: true } },
+    ]);
+  } catch (error) {
+    console.warn('No se pudieron registrar las acciones de notificación:', error.message);
+  }
+};
+
+const confirmarEnServidor = async (tipo, claveOcurrencia) => {
+  try {
+    if (!(await obtenerToken())) return { ok: false };
+    const idUsuario = await conLimite(AsyncStorage.getItem('userId'), 4000);
+    if (!idUsuario) return { ok: false };
+    const respuesta = await fetch(`${API_URL}/api/notifications/confirmar`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tipo, id_usuario: idUsuario, clave_ocurrencia: claveOcurrencia }),
+    });
+    if (!respuesta.ok) return { ok: false };
+    const datos = await respuesta.json().catch(() => ({}));
+    return { ok: true, yaConfirmada: Boolean(datos.yaConfirmada) };
+  } catch (error) {
+    console.warn('No se pudo confirmar la alerta:', error.message);
+    return { ok: false };
+  }
+};
+
+const confirmarBienestar = async (clave) => {
+  const resultado = await confirmarEnServidor('bienestar', clave);
+  if (!resultado.ok) {
+    Alert.alert('No se pudo confirmar', 'Revisa tu conexión e intenta tocar la notificación de nuevo.');
+  } else if (resultado.yaConfirmada) {
+    Alert.alert('Bienestar confirmado', 'Esta alerta ya estaba confirmada.');
+  } else {
+    Alert.alert('Bienestar confirmado', 'Se avisó al grupo que estás bien.');
+  }
+};
+
+const confirmarToma = async (clave) => {
+  const resultado = await confirmarEnServidor('medicamento', clave);
+  if (resultado.ok) Alert.alert('Toma confirmada', 'Se dejará de recordar esta toma al grupo.');
+  else Alert.alert('No se pudo confirmar', 'Revisa tu conexión e intenta de nuevo.');
+};
+
+const atenderRespuestaNotificacion = async (respuesta) => {
+  try {
+    const contenido = respuesta?.notification?.request?.content;
+    const datos = contenido?.data;
+    if (!datos?.tipo || !datos?.clave_ocurrencia) return;
+
+    const accion = respuesta.actionIdentifier;
+    if (accion !== Notifications.DEFAULT_ACTION_IDENTIFIER && accion !== ACCION_CONFIRMAR) return;
+
+    // Una misma respuesta (p. ej. la que abrió la app) no se procesa dos veces
+    const idRespuesta = `${respuesta.notification.request.identifier}:${accion}`;
+    if ((await conLimite(AsyncStorage.getItem(CLAVE_ULTIMA_RESPUESTA), 4000)) === idRespuesta) return;
+    await conLimite(AsyncStorage.setItem(CLAVE_ULTIMA_RESPUESTA, idRespuesta), 4000);
+
+    if (datos.tipo === 'bienestar') {
+      await confirmarBienestar(datos.clave_ocurrencia);
+    } else if (datos.tipo === 'medicamento') {
+      if (accion === ACCION_CONFIRMAR) {
+        await confirmarToma(datos.clave_ocurrencia);
+      } else {
+        Alert.alert('Recordatorio de medicamento', contenido?.body || '¿Ya se tomó el medicamento?', [
+          { text: 'Más tarde', style: 'cancel' },
+          { text: 'Confirmar toma', onPress: () => confirmarToma(datos.clave_ocurrencia) },
+        ]);
+      }
+    }
+  } catch (error) {
+    console.warn('No se pudo atender la notificación:', error.message);
+  }
+};
+
+// Mantiene registrado el token push del dispositivo (rotación del token) y atiende los toques sobre
+// las notificaciones mientras haya sesión.
 export const iniciarNotificaciones = () => {
   if (Platform.OS === 'web') return () => {};
-  const suscripcion = Notifications.addPushTokenListener(async (evento) => {
+  registrarCategorias();
+
+  const suscripcionToken = Notifications.addPushTokenListener(async (evento) => {
     if (registroEnCurso) return;
     const nuevo = evento?.data;
     if (!nuevo || nuevo === ultimoTokenRegistrado) return;
     if (await obtenerToken()) registrarNotificacionesPush({ solicitarPermiso: false });
   });
-  return () => suscripcion.remove();
+
+  const suscripcionRespuestas = Notifications.addNotificationResponseReceivedListener(atenderRespuestaNotificacion);
+  // Notificación que abrió la app estando cerrada
+  Notifications.getLastNotificationResponseAsync?.().then((respuesta) => {
+    if (respuesta) atenderRespuestaNotificacion(respuesta);
+  }).catch(() => {});
+
+  return () => {
+    suscripcionToken.remove();
+    suscripcionRespuestas.remove();
+  };
 };

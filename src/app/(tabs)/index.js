@@ -1,8 +1,9 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { usePathname } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Alert, AppState, KeyboardAvoidingView, Modal, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import FormPickerInput from '../../components/ui/FormPickerInput';
+import TutorialInicial from '../../components/ui/TutorialInicial';
 import { API_URL } from '../../config/api';
 import { apiFetch as fetch } from '../../config/apiFetch';
 
@@ -30,6 +31,40 @@ const fechaLocalISO = (fecha) => {
   return `${año}-${mes}-${dia}`;
 };
 
+// Fecha/hora de un elemento de la agenda como prefijo: vacío si es hoy, la fecha si es otro día.
+const prefijoDia = (fechaHora, ahora) =>
+  fechaLocalISO(fechaHora) === fechaLocalISO(ahora) ? '' : `${formatoFecha(fechaHora)} - `;
+
+// Elige únicamente la toma, el turno y el evento más cercanos que aún no han llegado a su hora.
+const calcularProximos = ({ medicamentos, turnos, eventos }, ahora) => {
+  const toma = medicamentos
+    .map((item) => ({ item, fechaHora: convertirFechaHora(item.fecha_inicio, item.hora_toma) }))
+    .filter(({ fechaHora }) => fechaHora && fechaHora >= ahora)
+    .sort((a, b) => a.fechaHora - b.fechaHora)[0];
+
+  const turno = turnos
+    .map((item) => ({ item, fechaHora: convertirFechaHora(item.fecha_inicio, item.hora_inicio) }))
+    .filter(({ fechaHora }) => fechaHora && fechaHora >= ahora)
+    .sort((a, b) => a.fechaHora - b.fechaHora)[0];
+
+  const evento = eventos
+    .map((item) => ({ item, fechaHora: convertirFechaHora(item.fecha_evento, item.hora_evento) }))
+    .filter(({ fechaHora }) => fechaHora && fechaHora >= ahora)
+    .sort((a, b) => a.fechaHora - b.fechaHora)[0];
+
+  return {
+    proximaToma: toma
+      ? `${prefijoDia(toma.fechaHora, ahora)}${horaSinSegundos(toma.item.hora_toma)} - ${toma.item.nombre_medicamento}: ${toma.item.dosis}`
+      : 'No hay una toma próxima',
+    proximoCuidador: turno
+      ? `${prefijoDia(turno.fechaHora, ahora)}${horaSinSegundos(turno.item.hora_inicio)} - ${horaSinSegundos(turno.item.hora_fin)} ${turno.item.encargado}`
+      : 'No hay un turno de cuidado próximo',
+    actividadProxima: evento
+      ? `${formatoFecha(evento.fechaHora)} - ${horaSinSegundos(evento.item.hora_evento)} - ${evento.item.nombre_evento}`
+      : 'No hay un evento próximo',
+  };
+};
+
 const ESCALA_ANIMO = [
   { valor: 'mal', emoji: '😞', etiqueta: 'Mal' },
   { valor: 'regular', emoji: '😐', etiqueta: 'Regular' },
@@ -41,14 +76,16 @@ export default function PantallaInicio() {
   const pathname = usePathname();
   const [datosPantalla, setDatosPantalla] = useState({
     cuidadorActual: 'Cargando...',
-    proximaToma: 'No hay tomas registradas',
-    proximoCuidador: 'No hay turnos registrados',
-    actividadProxima: 'No hay eventos próximos',
     fechaActual: new Date().getDate().toString(),
     diaActual: new Intl.DateTimeFormat('es', { weekday: 'long' }).format(new Date()).toUpperCase(),
   });
   const [idGrupo, setIdGrupo] = useState(null);
   const [idUsuario, setIdUsuario] = useState(null);
+  const [soyPaciente, setSoyPaciente] = useState(false);
+  const [agenda, setAgenda] = useState({ medicamentos: [], turnos: [], eventos: [] });
+  const [reloj, setReloj] = useState(() => new Date());
+  const [mostrarTutorial, setMostrarTutorial] = useState(false);
+  const tutorialComprobado = useRef(false);
   const [tienePaciente, setTienePaciente] = useState(false);
   const [modalSintoma, setModalSintoma] = useState(false);
   const [nombreSintoma, setNombreSintoma] = useState('');
@@ -90,6 +127,7 @@ export default function PantallaInicio() {
 
           const propio = miembros.find((m) => Number(m.id_usuario) === Number(idUsuarioActivo));
           const esPaciente = String(propio?.rol || '').trim().toLowerCase() === 'paciente';
+          setSoyPaciente(esPaciente);
           if (esPaciente) {
             const hoyISO = fechaLocalISO(new Date());
             const claveCheckin = `ultimoCheckinAnimo_${idUsuarioActivo}`;
@@ -107,36 +145,23 @@ export default function PantallaInicio() {
         
         if (!isMounted) return;
 
-        const ahora = new Date();
-        const limiteUnDia = new Date(ahora.getTime() + 24 * 60 * 60 * 1000);
-        const inicioDelDia = new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate());
+        setAgenda({
+          medicamentos: horarios.medicamentos || [],
+          turnos: horarios.horariosCuidado || [],
+          eventos: calendario.eventos || [],
+        });
+        setDatosPantalla((actual) => ({ ...actual, cuidadorActual: grupo.nombre_grupo }));
 
-        const medicamento = (horarios.medicamentos || [])
-          .map((item) => ({ item, fechaHora: convertirFechaHora(item.fecha_inicio, item.hora_toma) }))
-          .filter(({ fechaHora }) => fechaHora && fechaHora >= ahora && fechaHora <= limiteUnDia)
-          .sort((a, b) => a.fechaHora - b.fechaHora)[0];
-
-        const cuidado = (horarios.horariosCuidado || [])
-          .map((item) => ({ item, inicio: convertirFechaHora(item.fecha_inicio, item.hora_inicio), fin: convertirFechaHora(item.fecha_fin, item.hora_fin) }))
-          .filter(({ inicio, fin }) => inicio && inicio >= inicioDelDia && fin && fin >= ahora && fin <= limiteUnDia)
-          .sort((a, b) => (a.inicio || a.fin) - (b.inicio || b.fin))[0];
-
-        const evento = (calendario.eventos || [])
-          .map((item) => ({ item, fechaHora: convertirFechaHora(item.fecha_evento, item.hora_evento) }))
-          .filter(({ fechaHora }) => fechaHora && fechaHora >= ahora && fechaHora <= limiteUnDia)
-          .sort((a, b) => a.fechaHora - b.fechaHora)[0];
-
-        const toma = medicamento?.item;
-        const turno = cuidado?.item;
-        const proximoEvento = evento?.item;
-
-        setDatosPantalla((actual) => ({
-          ...actual,
-          cuidadorActual: grupo.nombre_grupo,
-          proximaToma: toma ? `${horaSinSegundos(toma.hora_toma)} - ${toma.nombre_medicamento}: ${toma.dosis}` : 'no hay tomas registradas',
-          proximoCuidador: turno ? `${horaSinSegundos(turno.hora_inicio)} - ${horaSinSegundos(turno.hora_fin)} ${turno.encargado}` : 'No hay turnos registrados',
-          actividadProxima: proximoEvento ? `${formatoFecha(convertirFechaHora(proximoEvento.fecha_evento, proximoEvento.hora_evento))} - ${horaSinSegundos(proximoEvento.hora_evento)} - ${proximoEvento.nombre_evento}` : 'No hay eventos próximos',
-        }));
+        // Tutorial del primer inicio de sesión de este usuario (una sola vez)
+        if (!tutorialComprobado.current) {
+          tutorialComprobado.current = true;
+          try {
+            const visto = await AsyncStorage.getItem(`tutorialVisto_${idUsuarioActivo}`);
+            if (!visto && isMounted) setMostrarTutorial(true);
+          } catch (error) {
+            console.warn('No se pudo comprobar el tutorial:', error.message);
+          }
+        }
       } catch (error) {
         console.error('Error al cargar resumen:', error);
       }
@@ -153,6 +178,50 @@ export default function PantallaInicio() {
       clearInterval(intervalo);
     };
   }, [pathname]); // Se dispara y actualiza al instante cada vez que cambia la ruta de navegación
+
+  // Reevalúa cada 15 s cuál es lo más próximo: al pasar la hora de una toma, turno o evento se muestra el siguiente.
+  useEffect(() => {
+    const temporizador = setInterval(() => setReloj(new Date()), 15000);
+    return () => clearInterval(temporizador);
+  }, []);
+
+  const proximos = calcularProximos(agenda, reloj);
+
+  const cerrarTutorial = async () => {
+    setMostrarTutorial(false);
+    try {
+      if (idUsuario) await AsyncStorage.setItem(`tutorialVisto_${idUsuario}`, 'true');
+    } catch (error) {
+      console.warn('No se pudo guardar el tutorial visto:', error.message);
+    }
+  };
+
+  const solicitarBienestar = () => {
+    Alert.alert(
+      'Alerta de bienestar',
+      'Se enviará una notificación al paciente para que confirme que está bien. ¿Continuar?',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Enviar',
+          onPress: async () => {
+            try {
+              const respuesta = await fetch(`${API_URL}/api/notifications/bienestar/solicitar`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id_usuario: idUsuario, id_grupo: idGrupo }),
+              });
+              const datos = await respuesta.json();
+              if (!respuesta.ok) throw new Error(datos.error || 'No se pudo enviar la alerta de bienestar');
+              Alert.alert('Alerta enviada', 'El paciente recibió la notificación. Si no confirma, se avisará en el chat del grupo.');
+            } catch (error) {
+              Alert.alert('No se pudo enviar', error.message);
+            }
+          },
+        },
+      ]
+    );
+  };
 
   const activarEmergencia = () => {
     Alert.alert('Emergencia', '¿Deseas notificar a todos los miembros del grupo?', [
@@ -289,9 +358,16 @@ export default function PantallaInicio() {
           <Text style={estilos.textoBienvenida}>¡Bienvenido! {datosPantalla.cuidadorActual}</Text>
         </View>
 
-        <TouchableOpacity style={estilos.botonEmergencia} onPress={activarEmergencia}>
-          <Text style={estilos.textoEmergencia}>EMERGENCIA</Text>
-        </TouchableOpacity>
+        <View style={estilos.filaBotonesAlerta}>
+          <TouchableOpacity style={[estilos.botonEmergencia, estilos.sinMargenInferior]} onPress={activarEmergencia}>
+            <Text style={estilos.textoEmergencia}>EMERGENCIA</Text>
+          </TouchableOpacity>
+          {tienePaciente && !soyPaciente && (
+            <TouchableOpacity style={[estilos.botonEmergencia, estilos.botonBienestar, estilos.sinMargenInferior]} onPress={solicitarBienestar}>
+              <Text style={estilos.textoEmergencia}>BIENESTAR</Text>
+            </TouchableOpacity>
+          )}
+        </View>
 
         <View style={estilos.tarjetaPrincipal}>
           <View style={estilos.columnaIzquierda}>
@@ -300,18 +376,18 @@ export default function PantallaInicio() {
           </View>
           
           <TouchableOpacity style={estilos.botonCita}>
-            <Text style={estilos.textoBotonCita}>{datosPantalla.actividadProxima}</Text>
+            <Text style={estilos.textoBotonCita}>{proximos.actividadProxima}</Text>
           </TouchableOpacity>
         </View>
 
         <View style={estilos.tarjetaSecundaria}>
           <Text style={estilos.tituloTarjeta}>Próxima Toma:</Text>
-          <Text style={estilos.contenidoTarjeta}>{datosPantalla.proximaToma}</Text>
+          <Text style={estilos.contenidoTarjeta}>{proximos.proximaToma}</Text>
         </View>
 
         <View style={estilos.tarjetaSecundaria}>
           <Text style={estilos.tituloTarjeta}>Próximo Cuidador:</Text>
-          <Text style={estilos.contenidoTarjeta}>{datosPantalla.proximoCuidador}</Text>
+          <Text style={estilos.contenidoTarjeta}>{proximos.proximoCuidador}</Text>
         </View>
 
         <TouchableOpacity style={estilos.botonRegistrarSintomas} onPress={abrirModalSintoma}>
@@ -387,6 +463,7 @@ export default function PantallaInicio() {
         </Modal>
 
       </ScrollView>
+      <TutorialInicial visible={mostrarTutorial && !modalAnimo} onClose={cerrarTutorial} />
     </SafeAreaView>
   );
 }
@@ -415,6 +492,19 @@ const estilos = StyleSheet.create({
     borderRadius: 25,
     alignSelf: 'flex-start',
     marginBottom: 20,
+  },
+  filaBotonesAlerta: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginBottom: 20,
+  },
+  sinMargenInferior: {
+    marginBottom: 0,
+    marginRight: 10,
+    marginTop: 0,
+  },
+  botonBienestar: {
+    backgroundColor: '#60A5A3',
   },
   textoEmergencia: {
     color: '#FFFFFF',

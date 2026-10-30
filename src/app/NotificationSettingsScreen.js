@@ -17,6 +17,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { API_URL } from '../config/api';
+import FormPickerInput from '../components/ui/FormPickerInput';
 import { apiFetch as fetch } from '../config/apiFetch';
 
 // Umbral de fuerza (en g, restando la gravedad) para considerar una sacudida "muy brusca"
@@ -24,6 +25,9 @@ const UMBRAL_SACUDIDA = 2.6;
 const LECTURAS_CONSECUTIVAS_REQUERIDAS = 3;
 const VENTANA_LECTURAS_MS = 900;
 const ENFRIAMIENTO_MS = 15000;
+
+const HORARIOS_PREDETERMINADOS = ['08:00', '12:00', '16:00', '19:00', '22:00'];
+const MAXIMO_ALERTAS_BIENESTAR = 5;
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -40,7 +44,8 @@ export default function NotificationSettingsScreen() {
   
   const [alertaBienestar, setAlertaBienestar] = useState(false);
   const [expandidoBienestar, setExpandidoBienestar] = useState(false);
-  const [frecuenciaBienestar, setFrecuenciaBienestar] = useState(1);
+  const [horariosBienestar, setHorariosBienestar] = useState([HORARIOS_PREDETERMINADOS[0]]);
+  const [esPaciente, setEsPaciente] = useState(true);
 
   const [recordatoriosMeds, setRecordatoriosMeds] = useState(false);
   const [expandidoMeds, setExpandidoMeds] = useState(false);
@@ -71,7 +76,9 @@ export default function NotificationSettingsScreen() {
           const datos = await respuesta.json();
           if (!montadaRef.current) return;
           setAlertaBienestar(datos.confirmacion_bienestar || false);
-          setFrecuenciaBienestar(datos.frecuencia || 1);
+          if (Array.isArray(datos.horarios) && datos.horarios.length > 0) setHorariosBienestar(datos.horarios);
+        } else if (respuesta.status === 404) {
+          setEsPaciente(false); // solo el paciente del grupo configura esta alerta
         }
       } catch (error) {
         if (montadaRef.current) console.error('Error al cargar preferencias:', error);
@@ -80,29 +87,7 @@ export default function NotificationSettingsScreen() {
     cargarConfiguracion();
   }, []);
 
-  // Marca la alerta como "leída" cuando el paciente toca la notificación (detiene reintentos/escalada)
-  useEffect(() => {
-    const confirmarDesdeNotificacion = async (data) => {
-      if (!data?.tipo || !data?.clave_ocurrencia) return;
-      try {
-        const idUsuario = await AsyncStorage.getItem('userId');
-        if (!idUsuario) return;
-        const respuesta = await fetch(`${API_URL}/api/notifications/confirmar`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ tipo: data.tipo, id_usuario: idUsuario, clave_ocurrencia: data.clave_ocurrencia }),
-        });
-        if (!respuesta.ok) throw new Error('No se pudo confirmar la alerta');
-      } catch (error) {
-        console.error('Error al confirmar alerta:', error);
-      }
-    };
-
-    const suscripcion = Notifications.addNotificationResponseReceivedListener((respuesta) => {
-      confirmarDesdeNotificacion(respuesta.notification.request.content.data);
-    });
-    return () => suscripcion.remove();
-  }, []);
+  // Los toques sobre las notificaciones de bienestar y medicamentos se atienden en utils/notificacionesCliente.js
 
   // Detección de sacudida muy brusca mediante el acelerómetro (requiere varias lecturas
   // consecutivas por encima del umbral para evitar falsos positivos con movimientos normales).
@@ -168,7 +153,7 @@ export default function NotificationSettingsScreen() {
     }
   };
 
-  const guardarPreferenciasBienestar = async (valor, frecuencia) => {
+  const guardarPreferenciasBienestar = async (valor, horarios) => {
     try {
       const idUsuario = await AsyncStorage.getItem('userId');
       if (!idUsuario) return false;
@@ -176,7 +161,7 @@ export default function NotificationSettingsScreen() {
       const respuesta = await fetch(`${API_URL}/api/notifications/bienestar/${idUsuario}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ confirmacion_bienestar: valor, frecuencia }),
+        body: JSON.stringify({ confirmacion_bienestar: valor, horarios }),
       });
       if (!respuesta.ok) throw new Error('No se pudieron guardar las preferencias de bienestar');
       return true;
@@ -187,7 +172,11 @@ export default function NotificationSettingsScreen() {
   };
 
   const guardarConfirmacionBienestar = async (valor) => {
-    const guardado = await guardarPreferenciasBienestar(valor, frecuenciaBienestar);
+    if (!esPaciente) {
+      Alert.alert('Solo para el paciente', 'La alerta de bienestar la configura el paciente del grupo desde su propio dispositivo.');
+      return;
+    }
+    const guardado = await guardarPreferenciasBienestar(valor, horariosBienestar);
     if (!guardado) {
       Alert.alert('Error', 'No se pudo guardar la preferencia de bienestar.');
       return;
@@ -271,16 +260,33 @@ const solicitarPermisosNotificacion = async () => {
     }
   };
 
-  const cambiarFrecuencia = async (incremento) => {
-    const nuevaFrecuencia = frecuenciaBienestar + incremento;
-    if (nuevaFrecuencia >= 1 && nuevaFrecuencia <= 5) {
-      const guardado = await guardarPreferenciasBienestar(alertaBienestar, nuevaFrecuencia);
-      if (!guardado) {
-        Alert.alert('Error', 'No se pudo guardar la frecuencia de bienestar.');
-        return;
-      }
-      setFrecuenciaBienestar(nuevaFrecuencia);
+  const aplicarHorarios = async (nuevosHorarios) => {
+    const ordenados = [...nuevosHorarios].sort();
+    const guardado = await guardarPreferenciasBienestar(alertaBienestar, ordenados);
+    if (!guardado) {
+      Alert.alert('Error', 'No se pudieron guardar las horas de la alerta de bienestar.');
+      return;
     }
+    setHorariosBienestar(ordenados);
+  };
+
+  const cambiarFrecuencia = async (incremento) => {
+    if (incremento < 0) {
+      if (horariosBienestar.length > 1) await aplicarHorarios(horariosBienestar.slice(0, -1));
+      return;
+    }
+    if (horariosBienestar.length >= MAXIMO_ALERTAS_BIENESTAR) return;
+    const nueva = HORARIOS_PREDETERMINADOS.find((hora) => !horariosBienestar.includes(hora));
+    if (nueva) await aplicarHorarios([...horariosBienestar, nueva]);
+  };
+
+  const cambiarHoraBienestar = async (indice, nuevaHora) => {
+    if (!nuevaHora || nuevaHora === horariosBienestar[indice]) return;
+    if (horariosBienestar.some((hora, i) => i !== indice && hora === nuevaHora)) {
+      Alert.alert('Hora repetida', 'Ya existe una alerta de bienestar a esa hora.');
+      return;
+    }
+    await aplicarHorarios(horariosBienestar.map((hora, i) => (i === indice ? nuevaHora : hora)));
   };
 
   return (
@@ -320,28 +326,31 @@ const solicitarPermisosNotificacion = async () => {
 
         {expandidoBienestar && alertaBienestar && (
           <View style={estilos.subOpciones}>
-            <Text style={estilos.subTextoLabel}>Frecuencia al día (Máx. 5 - Intervalos de 4 hrs):</Text>
+            <Text style={estilos.subTextoLabel}>Alertas al día (máx. 5). Elige la hora de cada una:</Text>
             <View style={estilos.filaFrecuencia}>
               <TouchableOpacity style={estilos.btnContador} onPress={() => cambiarFrecuencia(-1)}>
                 <Text style={estilos.txtContador}>-</Text>
               </TouchableOpacity>
-              <Text style={estilos.valorFrecuencia}>{frecuenciaBienestar}</Text>
+              <Text style={estilos.valorFrecuencia}>{horariosBienestar.length}</Text>
               <TouchableOpacity style={estilos.btnContador} onPress={() => cambiarFrecuencia(1)}>
                 <Text style={estilos.txtContador}>+</Text>
               </TouchableOpacity>
             </View>
 
-            {Array.from({ length: frecuenciaBienestar }).map((_, index) => (
-              <View key={index} style={estilos.cajaHora}>
+            {horariosBienestar.map((hora, index) => (
+              <View key={`${index}-${hora}`} style={estilos.cajaHora}>
                 <Text style={estilos.txtHoraLabel}>Alerta {index + 1}:</Text>
-                <View style={estilos.selectorHoraFicticio}>
-                  <Text style={estilos.txtHoraSeleccionada}>
-                    {index === 0 ? '08:00 AM' : index === 1 ? '12:00 PM' : index === 2 ? '04:00 PM' : index === 3 ? '07:00 PM' : '10:00 PM'}
-                  </Text>
-                  <Feather name="clock" size={16} color="#555" />
-                </View>
+                <FormPickerInput
+                  pickerType="time"
+                  modalTitle={`Hora de la alerta ${index + 1}`}
+                  style={estilos.selectorHora}
+                  placeholder="HH:MM"
+                  value={hora}
+                  onChangeText={(nuevaHora) => cambiarHoraBienestar(index, nuevaHora)}
+                />
               </View>
             ))}
+            <Text style={estilos.subTextoLabel}>• Si no confirmas en 5 min, se avisa al grupo en el chat cada 5 min.</Text>
           </View>
         )}
       </View>
@@ -374,6 +383,7 @@ const solicitarPermisosNotificacion = async () => {
           <View style={estilos.subOpciones}>
             <Text style={estilos.subTextoLabel}>• Anticipación de aviso: 15 minutos antes</Text>
             <Text style={estilos.subTextoLabel}>• Repetir si no hay confirmación: Cada 10 min</Text>
+            <Text style={estilos.subTextoLabel}>• Cualquier miembro del grupo puede confirmar la toma</Text>
           </View>
         )}
       </View>
@@ -493,8 +503,7 @@ const estilos = StyleSheet.create({
   valorFrecuencia: { marginHorizontal: 16, fontSize: 16, fontWeight: 'bold', color: '#000' },
   cajaHora: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#FFF', borderRadius: 10, paddingVertical: 6, paddingHorizontal: 12, marginBottom: 6 },
   txtHoraLabel: { fontSize: 13, fontWeight: '600', color: '#333' },
-  selectorHoraFicticio: { flexDirection: 'row', alignItems: 'center' },
-  txtHoraSeleccionada: { fontSize: 13, color: '#60A5A3', fontWeight: 'bold', marginRight: 6 },
+  selectorHora: { flex: 1, marginLeft: 12, marginBottom: 0, borderRadius: 8, backgroundColor: '#FFF' },
   botonPermiso: { backgroundColor: '#008B8B', borderRadius: 15, paddingVertical: 8, alignItems: 'center' },
   textoBotonPermiso: { color: '#FFF', fontSize: 13, fontWeight: '600' },
 });

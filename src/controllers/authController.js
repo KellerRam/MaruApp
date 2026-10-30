@@ -398,6 +398,113 @@ const completarPerfil = async (req, res) => {
   }
 };
 
+// ---------------------------------------------------------------------------
+// Recuperación de contraseña (reutiliza la tabla verificacion_correo; el registro se marca con MARCA_RECUPERACION)
+// ---------------------------------------------------------------------------
+const MARCA_RECUPERACION = 'RECUPERACION';
+
+const passwordNuevaValida = (password) =>
+  typeof password === 'string' && password.length >= 8 && password.length <= 14 && /[A-Z]/.test(password);
+
+const solicitarRecuperacion = async (req, res) => {
+  try {
+    const email = normalizarEmail(req.body?.email);
+    if (!emailValido(email)) {
+      return res.status(400).json({ error: 'Introduce un correo electrónico válido' });
+    }
+
+    const usuario = await pool.query('SELECT id_usuario FROM Usuario WHERE LOWER(correo) = $1', [email]);
+    if (usuario.rows.length === 0) {
+      return res.status(404).json({ error: 'No existe una cuenta asociada a ese correo' });
+    }
+
+    await emitirCodigoVerificacion(email, MARCA_RECUPERACION);
+    return res.status(200).json({ mensaje: 'Código de verificación enviado con éxito' });
+  } catch (error) {
+    return responderErrorCodigo(res, error);
+  }
+};
+
+const verificarRecuperacion = async (req, res) => {
+  try {
+    const email = normalizarEmail(req.body?.email);
+    const codigo = typeof req.body?.codigo === 'string' ? req.body.codigo.trim() : '';
+    if (!emailValido(email) || !/^\d{6}$/.test(codigo)) {
+      return res.status(400).json({ error: 'Correo o código inválido' });
+    }
+
+    const resultado = await pool.query(
+      'SELECT codigo_hash, expira_en, intentos, password_hash FROM verificacion_correo WHERE LOWER(correo) = $1',
+      [email]
+    );
+    const registro = resultado.rows[0];
+    if (!registro || registro.password_hash !== MARCA_RECUPERACION || !registro.codigo_hash) {
+      return res.status(400).json({ error: 'Solicita un código nuevo para continuar.' });
+    }
+    if (new Date(registro.expira_en) <= new Date()) {
+      return res.status(400).json({ error: 'El código caducó. Solicita uno nuevo.' });
+    }
+    if (registro.intentos >= OTP_MAX_ATTEMPTS) {
+      return res.status(429).json({ error: 'Demasiados intentos. Solicita un código nuevo.' });
+    }
+
+    const codigoHash = hashCodigo(email, codigo);
+    const hashBdLimpio = registro.codigo_hash.trim();
+    const coincide = hashBdLimpio.length === codigoHash.length &&
+      crypto.timingSafeEqual(Buffer.from(hashBdLimpio, 'hex'), Buffer.from(codigoHash, 'hex'));
+
+    if (!coincide) {
+      await pool.query('UPDATE verificacion_correo SET intentos = intentos + 1 WHERE LOWER(correo) = $1', [email]);
+      return res.status(400).json({ error: 'Código incorrecto.' });
+    }
+
+    await pool.query(
+      `UPDATE verificacion_correo
+       SET codigo_hash = NULL, verificado_en = NOW(), expira_en = NOW() + INTERVAL '15 minutes'
+       WHERE LOWER(correo) = $1`,
+      [email]
+    );
+    return res.status(200).json({ mensaje: 'Código verificado correctamente' });
+  } catch (error) {
+    console.error('Error en verificarRecuperacion:', error.message);
+    return res.status(500).json({ error: 'No se pudo verificar el código' });
+  }
+};
+
+const restablecerPassword = async (req, res) => {
+  try {
+    const email = normalizarEmail(req.body?.email);
+    const password = req.body?.password;
+    if (!emailValido(email) || !passwordNuevaValida(password)) {
+      return res.status(400).json({ error: 'La contraseña debe tener entre 8 y 14 caracteres y al menos una mayúscula.' });
+    }
+
+    const verificacion = await pool.query(
+      `SELECT 1 FROM verificacion_correo
+       WHERE LOWER(correo) = $1 AND password_hash = $2 AND verificado_en IS NOT NULL AND expira_en > NOW()`,
+      [email, MARCA_RECUPERACION]
+    );
+    if (verificacion.rows.length === 0) {
+      return res.status(400).json({ error: 'La verificación expiró. Solicita un código nuevo.' });
+    }
+
+    const passwordHash = await bcrypt.hash(password, 10);
+    const actualizado = await pool.query(
+      'UPDATE Usuario SET password_usuario = $1 WHERE LOWER(correo) = $2 RETURNING id_usuario',
+      [passwordHash, email]
+    );
+    if (actualizado.rows.length === 0) {
+      return res.status(404).json({ error: 'No existe una cuenta asociada a ese correo' });
+    }
+
+    await pool.query('DELETE FROM verificacion_correo WHERE LOWER(correo) = $1', [email]);
+    return res.status(200).json({ mensaje: 'Contraseña actualizada correctamente' });
+  } catch (error) {
+    console.error('Error en restablecerPassword:', error.message);
+    return res.status(500).json({ error: 'No se pudo actualizar la contraseña' });
+  }
+};
+
 module.exports = {
   solicitarCodigo,
   registrarUsuario,
@@ -407,5 +514,8 @@ module.exports = {
   socialLoginUsuario,
   obtenerPerfilUsuario,
   actualizarPerfilUsuario,
-  eliminarCuentaUsuario
+  eliminarCuentaUsuario,
+  solicitarRecuperacion,
+  verificarRecuperacion,
+  restablecerPassword
 };
