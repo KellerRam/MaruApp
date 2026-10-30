@@ -16,6 +16,7 @@ import {
     View
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import CaritaAnimo, { NIVELES_ANIMO } from '../components/ui/CaritaAnimo';
 import FormPickerInput from '../components/ui/FormPickerInput';
 import { API_URL } from '../config/api';
 import { apiFetch as fetch } from '../config/apiFetch';
@@ -45,6 +46,33 @@ const filtrarSintomas = (lista, tipo) => {
     });
   }
   return lista;
+};
+
+// Nivel de ánimo de un registro: el campo `animo` o, en registros anteriores, la etiqueta guardada como descripción.
+const ETIQUETAS_ANIMO_ANTERIORES = { mal: 'mal', regular: 'regular', bien: 'bien', 'muy bien': 'muy_bien' };
+const nivelDeAnimo = (registro) => {
+  if (NIVELES_ANIMO.includes(registro.animo)) return registro.animo;
+  if (String(registro.nombre_sintoma || '').trim().toLowerCase() === 'estado de ánimo') {
+    return ETIQUETAS_ANIMO_ANTERIORES[String(registro.descripcion || '').trim().toLowerCase()] || null;
+  }
+  return null;
+};
+
+// Agrupa por día: cada día muestra su estado de ánimo (solo el ícono, si lo registró) y sus síntomas.
+const agruparPorDia = (lista) => {
+  const dias = new Map();
+  lista.forEach((registro) => {
+    const fecha = String(registro.fecha_sintoma).split('T')[0];
+    if (!dias.has(fecha)) dias.set(fecha, { fecha, animo: null, sintomas: [] });
+    const dia = dias.get(fecha);
+    const nivel = nivelDeAnimo(registro);
+    if (nivel) {
+      if (!dia.animo) dia.animo = nivel; // la lista llega ordenada: se conserva el más reciente del día
+    } else {
+      dia.sintomas.push(registro);
+    }
+  });
+  return [...dias.values()].sort((a, b) => b.fecha.localeCompare(a.fecha));
 };
 
 export default function SymptomHistoryScreen() {
@@ -189,10 +217,21 @@ export default function SymptomHistoryScreen() {
       
       <Text style={estilos.descripcionSintoma}>{item.descripcion}</Text>
       
-      <View style={estilos.pieTarjeta}>
-        <Feather name="calendar" size={13} color="#666" style={{ marginRight: 6 }} />
-        <Text style={estilos.fechaSintoma}>{formatearFechaVisual(item.fecha_sintoma)}</Text>
+    </View>
+  );
+
+  const renderDia = ({ item: dia }) => (
+    <View style={estilos.bloqueDia}>
+      <View style={estilos.encabezadoDia}>
+        <View style={estilos.fechaDia}>
+          <Feather name="calendar" size={13} color="#666" style={{ marginRight: 6 }} />
+          <Text style={estilos.textoFechaDia}>{formatearFechaVisual(dia.fecha)}</Text>
+        </View>
+        {dia.animo ? <CaritaAnimo valor={dia.animo} tamano={34} /> : null}
       </View>
+      {dia.sintomas.map((sintoma) => (
+        <View key={String(sintoma.id_sintoma)}>{renderItemSintoma({ item: sintoma })}</View>
+      ))}
     </View>
   );
 
@@ -235,9 +274,9 @@ export default function SymptomHistoryScreen() {
         </View>
       ) : (
         <FlatList
-          data={sintomasFiltrados}
-          keyExtractor={(item) => String(item.id_sintoma)}
-          renderItem={renderItemSintoma}
+          data={agruparPorDia(sintomasFiltrados)}
+          keyExtractor={(dia) => dia.fecha}
+          renderItem={renderDia}
           contentContainerStyle={estilos.listaContenedor}
           showsVerticalScrollIndicator={false}
         />
@@ -282,6 +321,10 @@ export default function SymptomHistoryScreen() {
 }
 
 const estilos = StyleSheet.create({
+  bloqueDia: { marginBottom: 6 },
+  encabezadoDia: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 8, marginBottom: 8, minHeight: 34 },
+  fechaDia: { flexDirection: 'row', alignItems: 'center' },
+  textoFechaDia: { fontSize: 14, fontWeight: 'bold', color: '#0A3D4C' },
   contenedor: { flex: 1, backgroundColor: '#FFFFFF', paddingHorizontal: 20, paddingTop: 20 },
   contenedorCargando: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#FFF' },
   textoCargando: { marginTop: 10, fontSize: 14, color: '#666' },

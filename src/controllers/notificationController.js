@@ -66,6 +66,46 @@ const actualizarBienestar = async (req, res) => {
   }
 };
 
+// Preferencias de notificaciones de cualquier usuario (se guardan en el servidor para que persistan)
+const obtenerAjustes = async (req, res) => {
+  try {
+    const resultado = await pool.query(
+      'SELECT notif_medicamentos, notif_eventos, notif_emergencia FROM usuario WHERE id_usuario = $1',
+      [req.params.id_usuario]
+    );
+    if (resultado.rows.length === 0) return res.status(404).json({ error: 'Usuario no encontrado' });
+    const fila = resultado.rows[0];
+    res.json({
+      medicamentos: fila.notif_medicamentos,
+      eventos: fila.notif_eventos,
+      emergencia: fila.notif_emergencia,
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+const actualizarAjustes = async (req, res) => {
+  try {
+    const campos = { medicamentos: 'notif_medicamentos', eventos: 'notif_eventos', emergencia: 'notif_emergencia' };
+    const sets = [];
+    const valores = [];
+    for (const [clave, columna] of Object.entries(campos)) {
+      if (typeof req.body?.[clave] === 'boolean') {
+        valores.push(req.body[clave]);
+        sets.push(`${columna} = $${valores.length}`);
+      }
+    }
+    if (sets.length === 0) return res.status(400).json({ error: 'No se indicó ninguna preferencia válida' });
+
+    valores.push(req.params.id_usuario);
+    await pool.query(`UPDATE usuario SET ${sets.join(', ')} WHERE id_usuario = $${valores.length}`, valores);
+    res.json({ mensaje: 'Preferencias guardadas' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
 // Guarda o actualiza el token de notificaciones push del dispositivo del usuario
 const guardarTokenPush = async (req, res) => {
   try {
@@ -225,6 +265,8 @@ const confirmarAlerta = async (req, res) => {
 module.exports = {
   obtenerPreferencias,
   actualizarBienestar,
+  obtenerAjustes,
+  actualizarAjustes,
   guardarTokenPush,
   eliminarTokenPush,
   solicitarAlertaBienestar,

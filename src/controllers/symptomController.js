@@ -5,6 +5,8 @@ const fechaISOValida = (fecha) => typeof fecha === 'string'
   && !Number.isNaN(Date.parse(`${fecha}T00:00:00.000Z`))
   && new Date(`${fecha}T00:00:00.000Z`).toISOString().slice(0, 10) === fecha;
 
+const NIVELES_ANIMO = ['mal', 'regular', 'bien', 'muy_bien'];
+
 const hora24Valida = (hora) => {
   if (typeof hora !== 'string') return false;
   // Permite tanto HH:MM como HH:MM:SS
@@ -13,8 +15,9 @@ const hora24Valida = (hora) => {
 
 const crearSintoma = async (req, res) => {
   try {
-    const { nombre_sintoma, descripcion, fecha_sintoma, hora_sintoma } = req.body || {};
+    const { nombre_sintoma, descripcion, fecha_sintoma, hora_sintoma, animo } = req.body || {};
     const idUsuario = req.usuarioAutenticado.id;
+    const animoValido = typeof animo === 'string' && NIVELES_ANIMO.includes(animo) ? animo : null;
 
     if (!nombre_sintoma?.trim() || !descripcion?.trim() || !fechaISOValida(fecha_sintoma) || !hora24Valida(hora_sintoma)) {
       return res.status(400).json({ error: 'Todos los campos son obligatorios y deben ser válidos' });
@@ -45,10 +48,10 @@ const crearSintoma = async (req, res) => {
     const idPaciente = pacienteRes.rows[0].id_usuario;
 
     const resultado = await pool.query(
-      `INSERT INTO sintoma (id_usuario, nombre_sintoma, descripcion, fecha_sintoma, hora_sintoma)
-       VALUES ($1, $2, $3, $4, $5)
-       RETURNING id_sintoma, id_usuario, nombre_sintoma, descripcion, fecha_sintoma, hora_sintoma`,
-      [idPaciente, nombre_sintoma.trim(), descripcion.trim(), fecha_sintoma, `${hora_sintoma}:00`]
+      `INSERT INTO sintoma (id_usuario, nombre_sintoma, descripcion, fecha_sintoma, hora_sintoma, animo)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING id_sintoma, id_usuario, nombre_sintoma, descripcion, fecha_sintoma, hora_sintoma, animo`,
+      [idPaciente, nombre_sintoma.trim(), descripcion.trim(), fecha_sintoma, `${hora_sintoma}:00`, animoValido]
     );
 
     res.status(201).json({ sintoma: resultado.rows[0] });
@@ -82,7 +85,7 @@ const obtenerSintomas = async (req, res) => {
     }
 
     const resultado = await pool.query(
-      `SELECT id_sintoma, id_usuario, nombre_sintoma, descripcion, fecha_sintoma, hora_sintoma 
+      `SELECT id_sintoma, id_usuario, nombre_sintoma, descripcion, TO_CHAR(fecha_sintoma, 'YYYY-MM-DD') AS fecha_sintoma, hora_sintoma, animo
        FROM sintoma 
        WHERE id_usuario = $1 
        ORDER BY fecha_sintoma DESC, hora_sintoma DESC`,

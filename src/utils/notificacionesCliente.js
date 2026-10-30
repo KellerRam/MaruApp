@@ -5,6 +5,7 @@ import * as Notifications from 'expo-notifications';
 import { Alert, Platform } from 'react-native';
 import { API_URL } from '../config/api';
 import { apiFetch as fetch } from '../config/apiFetch';
+import { iniciarVigilanciaEmergencia } from './emergenciaSegundoPlano';
 import { alCerrarSesion, conLimite, obtenerToken } from './session';
 
 // Registro de notificaciones push para Android e iOS. Cada paso tiene tiempo límite o captura sus
@@ -91,7 +92,10 @@ const ejecutarRegistro = async ({ solicitarPermiso = true } = {}) => {
 };
 
 // Se invoca al iniciar sesión, al registrarse y al restaurar la sesión guardada.
-export const activarNotificacionesDeSesion = () => registrarNotificacionesPush({ solicitarPermiso: true });
+export const activarNotificacionesDeSesion = () => {
+  iniciarVigilanciaEmergencia(); // la detección de sacudida arranca con la sesión
+  return registrarNotificacionesPush({ solicitarPermiso: true });
+};
 
 // ---------------------------------------------------------------------------
 // Respuesta a las notificaciones de bienestar y medicamentos

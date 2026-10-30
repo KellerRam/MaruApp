@@ -3,7 +3,6 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 import * as Notifications from 'expo-notifications';
 import { useRouter } from 'expo-router';
-import { Accelerometer } from 'expo-sensors';
 import { useEffect, useRef, useState } from 'react';
 import {
     Alert,
@@ -19,12 +18,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { API_URL } from '../config/api';
 import FormPickerInput from '../components/ui/FormPickerInput';
 import { apiFetch as fetch } from '../config/apiFetch';
-
-// Umbral de fuerza (en g, restando la gravedad) para considerar una sacudida "muy brusca"
-const UMBRAL_SACUDIDA = 2.6;
-const LECTURAS_CONSECUTIVAS_REQUERIDAS = 3;
-const VENTANA_LECTURAS_MS = 900;
-const ENFRIAMIENTO_MS = 15000;
+import { SEGUNDO_PLANO_DISPONIBLE, reiniciarVigilanciaEmergencia, solicitarPermisosEmergencia } from '../utils/emergenciaSegundoPlano';
 
 const HORARIOS_PREDETERMINADOS = ['08:00', '12:00', '16:00', '19:00', '22:00'];
 const MAXIMO_ALERTAS_BIENESTAR = 5;
@@ -46,13 +40,14 @@ export default function NotificationSettingsScreen() {
   const [expandidoBienestar, setExpandidoBienestar] = useState(false);
   const [horariosBienestar, setHorariosBienestar] = useState([HORARIOS_PREDETERMINADOS[0]]);
   const [esPaciente, setEsPaciente] = useState(true);
+  const [ajustesCargados, setAjustesCargados] = useState(false);
 
-  const [recordatoriosMeds, setRecordatoriosMeds] = useState(false);
+  const [recordatoriosMeds, setRecordatoriosMeds] = useState(true);
   const [expandidoMeds, setExpandidoMeds] = useState(false);
 
   const [expandidoPermisos, setExpandidoPermisos] = useState(false);
 
-  const [eventosProximos, setEventosProximos] = useState(false);
+  const [eventosProximos, setEventosProximos] = useState(true);
   const [expandidoEventos, setExpandidoEventos] = useState(false);
 
   const [emergencia, setEmergencia] = useState(true);
@@ -87,71 +82,75 @@ export default function NotificationSettingsScreen() {
     cargarConfiguracion();
   }, []);
 
-  // Los toques sobre las notificaciones de bienestar y medicamentos se atienden en utils/notificacionesCliente.js
-
-  // Detección de sacudida muy brusca mediante el acelerómetro (requiere varias lecturas
-  // consecutivas por encima del umbral para evitar falsos positivos con movimientos normales).
-  // Nota: en apps administradas por Expo (Expo Go o incluso development build) la detección solo
-  // funciona mientras el proceso de JS siga vivo (primer plano o segundo plano reciente); una vez
-  // el sistema operativo mata la app o el dispositivo está bloqueado por mucho tiempo, se requeriría
-  // un módulo nativo con servicio en segundo plano (fuera del alcance de Expo managed).
+  // Preferencias guardadas en el servidor (persisten aunque se cierre la app o se reinstale)
   useEffect(() => {
-    let subscription = null;
-
-    if (emergencia) {
-      let ultimaActualizacion = 0;
-      let lecturasRecientes = [];
-      let ultimoDisparo = 0;
-
-      Accelerometer.setUpdateInterval(100);
-      subscription = Accelerometer.addListener(({ x, y, z }) => {
-        const ahora = Date.now();
-        if (ahora - ultimaActualizacion < 90) return;
-        ultimaActualizacion = ahora;
-
-        const magnitud = Math.sqrt(x * x + y * y + z * z);
-        const fuerzaNeta = Math.abs(magnitud - 1); // resta la gravedad (~1g en reposo)
-
-        lecturasRecientes = lecturasRecientes.filter((t) => ahora - t < VENTANA_LECTURAS_MS);
-        if (fuerzaNeta > UMBRAL_SACUDIDA) {
-          lecturasRecientes.push(ahora);
-        }
-
-        if (lecturasRecientes.length >= LECTURAS_CONSECUTIVAS_REQUERIDAS && ahora - ultimoDisparo > ENFRIAMIENTO_MS) {
-          ultimoDisparo = ahora;
-          lecturasRecientes = [];
-          dispararEmergenciaPorAgitacion();
-        }
-      });
-    }
-
-    return () => {
-      if (subscription) {
-        subscription.remove();
+    const cargarAjustes = async () => {
+      try {
+        const idUsuario = await AsyncStorage.getItem('userId');
+        if (!idUsuario || !montadaRef.current) return;
+        const respuesta = await fetch(`${API_URL}/api/notifications/ajustes/${idUsuario}`);
+        if (!respuesta.ok || !montadaRef.current) return;
+        const datos = await respuesta.json();
+        if (!montadaRef.current) return;
+        setRecordatoriosMeds(datos.medicamentos !== false);
+        setEventosProximos(datos.eventos !== false);
+        setEmergencia(datos.emergencia !== false);
+        setAjustesCargados(true);
+      } catch (error) {
+        if (montadaRef.current) console.error('Error al cargar los ajustes de notificaciones:', error);
       }
     };
-  }, [emergencia]);
+    cargarAjustes();
+  }, []);
 
-  const dispararEmergenciaPorAgitacion = async () => {
+  // Guarda un ajuste en el servidor; devuelve false si no se pudo
+  const guardarAjuste = async (campo, valor) => {
     try {
-      const idGrupo = await AsyncStorage.getItem('groupId');
       const idUsuario = await AsyncStorage.getItem('userId');
-      if (!idGrupo || !idUsuario) return;
-
-      // Envía alerta al chat o endpoint de emergencia del backend igual que el botón principal
-      const respuesta = await fetch(`${API_URL}/api/emergency/trigger`, {
-        method: 'POST',
+      if (!idUsuario) return false;
+      const respuesta = await fetch(`${API_URL}/api/notifications/ajustes/${idUsuario}`, {
+        method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id_grupo: idGrupo, id_usuario: idUsuario, motivo: 'Agitación brusca detectada por sensor' }),
+        body: JSON.stringify({ [campo]: valor }),
       });
-      if (!respuesta.ok) throw new Error('El servidor no pudo registrar la emergencia');
-      if (!montadaRef.current) return;
-
-      Alert.alert('¡Alerta de Emergencia!', 'Se ha detectado un movimiento brusco. Se ha notificado al grupo y cuidadores.');
+      return respuesta.ok;
     } catch (error) {
-      console.error('Error al disparar emergencia automática:', error);
+      console.error('Error al guardar el ajuste de notificaciones:', error);
+      return false;
     }
   };
+
+  const cambiarAjuste = async (campo, valor, aplicarEstado, alCambiar) => {
+    aplicarEstado(valor);
+    const guardado = await guardarAjuste(campo, valor);
+    if (!guardado) {
+      aplicarEstado(!valor);
+      Alert.alert('Error', 'No se pudo guardar la preferencia. Revisa tu conexión e intenta de nuevo.');
+      return;
+    }
+    if (alCambiar) await alCambiar(valor);
+  };
+
+  const cambiarEmergencia = (valor) =>
+    cambiarAjuste('emergencia', valor, (v) => {
+      setEmergencia(v);
+      if (!v) setExpandidoEmergencia(false);
+    }, async (activada) => {
+      if (activada) {
+        const concedido = await solicitarPermisosEmergencia();
+        if (SEGUNDO_PLANO_DISPONIBLE && !concedido && montadaRef.current) {
+          Alert.alert(
+            'Segundo plano limitado',
+            'La detección funcionará con la app abierta. Para que también funcione con la app cerrada o el teléfono bloqueado, permite la ubicación "Siempre" para Maru en los ajustes del dispositivo.'
+          );
+        }
+      }
+      await reiniciarVigilanciaEmergencia();
+    });
+
+  // Los toques sobre las notificaciones de bienestar y medicamentos se atienden en utils/notificacionesCliente.js
+
+  // La detección de sacudida (también en segundo plano) vive en utils/emergenciaSegundoPlano.js
 
   const guardarPreferenciasBienestar = async (valor, horarios) => {
     try {
@@ -248,6 +247,7 @@ const solicitarPermisosNotificacion = async () => {
       }
 
       await registrarTokenPush();
+      if (emergencia) await solicitarPermisosEmergencia();
 
       Alert.alert(
         '¡Éxito!',
@@ -364,10 +364,11 @@ const solicitarPermisosNotificacion = async () => {
               trackColor={{ false: '#767577', true: '#0A3D4C' }}
               thumbColor={'#f4f3f4'}
               value={recordatoriosMeds}
-              onValueChange={(val) => {
-                setRecordatoriosMeds(val);
-                if (!val) setExpandidoMeds(false);
-              }}
+              disabled={!ajustesCargados}
+              onValueChange={(val) => cambiarAjuste('medicamentos', val, (v) => {
+                setRecordatoriosMeds(v);
+                if (!v) setExpandidoMeds(false);
+              })}
             />
             <TouchableOpacity 
               disabled={!recordatoriosMeds}
@@ -418,10 +419,11 @@ const solicitarPermisosNotificacion = async () => {
               trackColor={{ false: '#767577', true: '#0A3D4C' }}
               thumbColor={'#f4f3f4'}
               value={eventosProximos}
-              onValueChange={(val) => {
-                setEventosProximos(val);
-                if (!val) setExpandidoEventos(false);
-              }}
+              disabled={!ajustesCargados}
+              onValueChange={(val) => cambiarAjuste('eventos', val, (v) => {
+                setEventosProximos(v);
+                if (!v) setExpandidoEventos(false);
+              })}
             />
             <TouchableOpacity 
               disabled={!eventosProximos}
@@ -450,10 +452,8 @@ const solicitarPermisosNotificacion = async () => {
               trackColor={{ false: '#767577', true: '#0A3D4C' }}
               thumbColor={'#f4f3f4'}
               value={emergencia}
-              onValueChange={(val) => {
-                setEmergencia(val);
-                if (!val) setExpandidoEmergencia(false);
-              }}
+              disabled={!ajustesCargados}
+              onValueChange={cambiarEmergencia}
             />
             <TouchableOpacity 
               disabled={!emergencia}
@@ -468,7 +468,14 @@ const solicitarPermisosNotificacion = async () => {
         {expandidoEmergencia && emergencia && (
           <View style={estilos.subOpciones}>
             <Text style={estilos.subTextoLabel}>• Alerta prioritaria para cuidadores</Text>
-            <Text style={estilos.subTextoLabel}>• Sensor de movimiento por giroscopio activado</Text>
+            {SEGUNDO_PLANO_DISPONIBLE ? (
+              <>
+                <Text style={estilos.subTextoLabel}>• Sacude bruscamente el teléfono para alertar al grupo (también con la app cerrada)</Text>
+                <Text style={estilos.subTextoLabel}>• Requiere permitir la ubicación "Siempre" para funcionar en segundo plano</Text>
+              </>
+            ) : (
+              <Text style={estilos.subTextoLabel}>• Sacude bruscamente el teléfono con la app abierta para alertar al grupo</Text>
+            )}
           </View>
         )}
       </View>

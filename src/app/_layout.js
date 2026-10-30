@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react';
 import { BackHandler, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { API_URL } from '../config/api';
 import { apiFetch as fetch } from '../config/apiFetch';
+import { iniciarVigilanciaEmergencia } from '../utils/emergenciaSegundoPlano';
 import { iniciarNotificaciones } from '../utils/notificacionesCliente';
 import { alCerrarSesion, alExpirarSesion, cerrarSesion } from '../utils/session';
 
@@ -115,6 +116,9 @@ export default function RootLayout() {
 
   // Mantiene registrado el token push del dispositivo (rotación del token) mientras haya sesión.
   useEffect(() => iniciarNotificaciones(), []);
+
+  // Detección de emergencia por sacudida (también en segundo plano) si hay sesión guardada.
+  useEffect(() => { iniciarVigilanciaEmergencia(); }, []);
 
   // Si el servidor invalida la sesión (token vencido), se vuelve al login.
   useEffect(() => alExpirarSesion(() => router.replace('/login')), [router]);

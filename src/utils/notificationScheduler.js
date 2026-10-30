@@ -72,11 +72,14 @@ const reclamarReenvio = async (tipo, clave, minutos) => {
   return resultado.rows.length > 0;
 };
 
-const obtenerMiembrosConToken = async (idGrupo) => {
+// preferencia (opcional): columna de usuario que debe estar activa para recibir este tipo de aviso.
+const PREFERENCIAS_VALIDAS = ['notif_medicamentos', 'notif_eventos'];
+const obtenerMiembrosConToken = async (idGrupo, preferencia = null) => {
+  const filtro = PREFERENCIAS_VALIDAS.includes(preferencia) ? `AND u.${preferencia} = true` : '';
   const miembros = await pool.query(
     `SELECT u.id_usuario, u.push_token FROM grupo_usuario gu
      INNER JOIN usuario u ON u.id_usuario = gu.id_usuario
-     WHERE gu.id_grupo = $1 ORDER BY u.id_usuario`,
+     WHERE gu.id_grupo = $1 ${filtro} ORDER BY u.id_usuario`,
     [idGrupo]
   );
   return miembros.rows;
@@ -199,7 +202,7 @@ const verificarRecordatoriosMedicamento = async () => {
     const existente = await obtenerAlerta('medicamento', clave);
 
     if (!existente) {
-      const miembros = await obtenerMiembrosConToken(toma.id_grupo);
+      const miembros = await obtenerMiembrosConToken(toma.id_grupo, 'notif_medicamentos');
       const tokens = miembros.map((m) => m.push_token).filter(esTokenValido);
       if (tokens.length === 0) continue;
 
@@ -223,7 +226,7 @@ const verificarRecordatoriosMedicamento = async () => {
     if (existente.leida) continue;
     if (!(await reclamarReenvio('medicamento', clave, MINUTOS_REINTENTO_MEDICAMENTO))) continue;
 
-    const miembros = await obtenerMiembrosConToken(toma.id_grupo);
+    const miembros = await obtenerMiembrosConToken(toma.id_grupo, 'notif_medicamentos');
     await enviarPushATokens(miembros.map((m) => m.push_token), {
       title: 'Recordatorio de medicamento',
       body: `Aún no se confirma la toma: ${detalle}`,
@@ -254,7 +257,7 @@ const verificarRecordatoriosEvento = async () => {
 
     if (minutosParaElEvento > MINUTOS_AVISO_EVENTO || minutosParaElEvento <= MINUTOS_AVISO_EVENTO - MINUTOS_MARGEN_AVISO_EVENTO) continue;
 
-    const miembros = await obtenerMiembrosConToken(evento.id_grupo);
+    const miembros = await obtenerMiembrosConToken(evento.id_grupo, 'notif_eventos');
     const reservado = await pool.query(
       'INSERT INTO alerta_evento_enviada (id_evento) VALUES ($1) ON CONFLICT (id_evento) DO NOTHING RETURNING id_evento',
       [evento.id_evento]

@@ -204,6 +204,13 @@ export default function PantallaCalendario() {
     setErrorFormulario('');
   };
 
+  // Reloj propio para el recuadro de tomas de hoy: al pasar la hora de una toma deja de mostrarse.
+  const [ahoraReloj, setAhoraReloj] = useState(() => new Date());
+  useEffect(() => {
+    const temporizador = setInterval(() => setAhoraReloj(new Date()), 30000);
+    return () => clearInterval(temporizador);
+  }, []);
+
   useEffect(() => {
     const intervalo = setInterval(() => {
       const ahora = new Date();
@@ -799,9 +806,13 @@ export default function PantallaCalendario() {
   const horariosCuidadoDeHoy = horariosCuidado.filter(
     (turno) => String(turno.fecha_inicio || '').split('T')[0] === fechaHoyISO
   );
-  const horariosMedicamentosDeHoy = horariosMedicamentos.filter(
-    (toma) => String(toma.fecha_inicio || '').split('T')[0] === fechaHoyISO
-  );
+  // Solo tomas futuras de hoy, ordenadas por hora
+  const fechaReloj = formatearFechaISO(ahoraReloj);
+  const horaReloj = `${String(ahoraReloj.getHours()).padStart(2, '0')}:${String(ahoraReloj.getMinutes()).padStart(2, '0')}`;
+  const horariosMedicamentosDeHoy = horariosMedicamentos
+    .filter((toma) => String(toma.fecha_inicio || '').split('T')[0] === fechaReloj
+      && String(toma.hora_toma || '').slice(0, 5) > horaReloj)
+    .sort((a, b) => String(a.hora_toma).localeCompare(String(b.hora_toma)));
 
   if (mostrarCalendarioExtendido) {
     return (
@@ -1237,7 +1248,7 @@ export default function PantallaCalendario() {
           ))
         ) : (
           <View style={{ padding: 10, alignItems: 'center' }}>
-            <Text style={{ color: '#777', fontStyle: 'italic' }}>No hay medicamentos registrados en este horario.</Text>
+            <Text style={{ color: '#777', fontStyle: 'italic' }}>No hay más tomas programadas para hoy.</Text>
           </View>
         )}
 

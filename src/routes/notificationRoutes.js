@@ -2,6 +2,8 @@ const express = require('express');
 const {
   obtenerPreferencias,
   actualizarBienestar,
+  obtenerAjustes,
+  actualizarAjustes,
   guardarTokenPush,
   eliminarTokenPush,
   solicitarAlertaBienestar,
@@ -14,6 +16,8 @@ const { requireAuth, requireOwnParam, requireOwnBody, requireGroupMember } = req
 router.use(requireAuth);
 
 router.get('/preferences/:id_usuario', requireOwnParam('id_usuario'), obtenerPreferencias);
+router.get('/ajustes/:id_usuario', requireOwnParam('id_usuario'), obtenerAjustes);
+router.put('/ajustes/:id_usuario', requireOwnParam('id_usuario'), actualizarAjustes);
 router.put('/bienestar/:id_usuario', requireOwnParam('id_usuario'), actualizarBienestar);
 router.post('/push-token/:id_usuario', requireOwnParam('id_usuario'), guardarTokenPush);
 router.delete('/push-token/:id_usuario', requireOwnParam('id_usuario'), eliminarTokenPush);

@@ -1,7 +1,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { usePathname } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
-import { Alert, AppState, KeyboardAvoidingView, Modal, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, AppState, KeyboardAvoidingView, Modal, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import CaritaAnimo from '../../components/ui/CaritaAnimo';
 import FormPickerInput from '../../components/ui/FormPickerInput';
 import TutorialInicial from '../../components/ui/TutorialInicial';
 import { API_URL } from '../../config/api';
@@ -74,6 +75,8 @@ const ESCALA_ANIMO = [
 
 export default function PantallaInicio() {
   const pathname = usePathname();
+  const { width: anchoPantalla } = useWindowDimensions();
+  const tamanoCarita = Math.min(72, Math.floor((anchoPantalla - 48 - 3 * 10 - 4 * 8) / 4));
   const [datosPantalla, setDatosPantalla] = useState({
     cuidadorActual: 'Cargando...',
     fechaActual: new Date().getDate().toString(),
@@ -275,6 +278,7 @@ export default function PantallaInicio() {
         body: JSON.stringify({
           idUsuario,
           nombre_sintoma: 'Estado de ánimo',
+          animo: opcion.valor,
           descripcion: textoAnimo.trim() || opcion.etiqueta,
           fecha_sintoma: fechaLocalISO(ahora),
           hora_sintoma: horaSinSegundos(ahora.toTimeString()),
@@ -426,28 +430,31 @@ export default function PantallaInicio() {
           </KeyboardAvoidingView>
         </Modal>
 
-        <Modal visible={modalAnimo} transparent animationType="fade" onRequestClose={omitirCheckinAnimo}>
-          <KeyboardAvoidingView style={estilos.fondoModal} behavior="padding">
-            <View style={estilos.modalAnimo}>
-              <TouchableOpacity style={estilos.botonCerrarAnimo} onPress={omitirCheckinAnimo}>
+        <Modal visible={modalAnimo} animationType="fade" onRequestClose={omitirCheckinAnimo}>
+          <SafeAreaView style={estilos.pantallaAnimo}>
+            <KeyboardAvoidingView style={estilos.contenidoAnimo} behavior="padding">
+              <TouchableOpacity style={estilos.botonCerrarAnimo} onPress={omitirCheckinAnimo} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
                 <Text style={estilos.textoCerrarAnimo}>✕</Text>
               </TouchableOpacity>
+
               <Text style={estilos.tituloModalAnimo}>¿Cómo se siente hoy?</Text>
+
               <View style={estilos.filaEmojis}>
                 {ESCALA_ANIMO.map((opcion) => (
-                  <TouchableOpacity
+                  <CaritaAnimo
                     key={opcion.valor}
-                    style={[estilos.circuloEmoji, animoSeleccionado === opcion.valor && estilos.circuloEmojiActivo]}
+                    valor={opcion.valor}
+                    tamano={tamanoCarita}
+                    seleccionada={animoSeleccionado === opcion.valor}
                     onPress={() => setAnimoSeleccionado(opcion.valor)}
-                  >
-                    <Text style={estilos.textoEmoji}>{opcion.emoji}</Text>
-                  </TouchableOpacity>
+                  />
                 ))}
               </View>
+
               <TextInput
                 style={estilos.inputAnimo}
                 placeholder="Agregar síntoma..."
-                placeholderTextColor="#48d9d9"
+                placeholderTextColor="#8A8A8A"
                 value={textoAnimo}
                 onChangeText={setTextoAnimo}
                 multiline
@@ -458,8 +465,8 @@ export default function PantallaInicio() {
               <TouchableOpacity onPress={omitirCheckinAnimo}>
                 <Text style={estilos.textoOmitirAnimo}>Omitir</Text>
               </TouchableOpacity>
-            </View>
-          </KeyboardAvoidingView>
+            </KeyboardAvoidingView>
+          </SafeAreaView>
         </Modal>
 
       </ScrollView>
@@ -628,82 +635,66 @@ const estilos = StyleSheet.create({
   textoCancelarSintoma: {
     color: '#666666',
   },
-  modalAnimo: {
-    width: '86%',
-    maxWidth: 360,
+  pantallaAnimo: {
+    flex: 1,
     backgroundColor: '#FFFFFF',
-    borderRadius: 20,
-    padding: 24,
-    alignItems: 'center',
+  },
+  contenidoAnimo: {
+    flex: 1,
+    justifyContent: 'center',
+    paddingHorizontal: 24,
   },
   botonCerrarAnimo: {
     position: 'absolute',
-    top: 12,
-    right: 12,
+    top: 16,
+    right: 24,
     padding: 4,
   },
   textoCerrarAnimo: {
-    fontSize: 16,
-    color: '#333333',
+    fontSize: 28,
+    fontWeight: 'bold',
+    color: '#000000',
   },
   tituloModalAnimo: {
-    fontSize: 20,
+    fontSize: 30,
     fontWeight: 'bold',
     color: '#111111',
     textAlign: 'center',
-    marginBottom: 20,
-    marginTop: 8,
+    marginBottom: 28,
   },
   filaEmojis: {
     flexDirection: 'row',
     justifyContent: 'center',
-    gap: 12,
-    marginBottom: 20,
-  },
-  circuloEmoji: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    backgroundColor: '#FFDE59',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  circuloEmojiActivo: {
-    borderWidth: 3,
-    borderColor: '#008B8B',
-  },
-  textoEmoji: {
-    fontSize: 26,
+    marginBottom: 28,
   },
   inputAnimo: {
     width: '100%',
-    borderWidth: 1,
-    borderColor: '#CCCCCC',
+    borderWidth: 2,
+    borderColor: '#111111',
     borderRadius: 12,
     paddingHorizontal: 14,
     paddingVertical: 12,
-    minHeight: 60,
+    minHeight: 110,
     textAlignVertical: 'top',
     color: '#222222',
     marginBottom: 20,
   },
   botonGuardarAnimo: {
     width: '100%',
-    backgroundColor: '#A8D8D0',
+    backgroundColor: '#C8E8E2',
     borderRadius: 20,
     paddingVertical: 12,
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: 14,
   },
   textoGuardarAnimo: {
-    color: '#0A3D4C',
+    color: '#111111',
     fontSize: 15,
-    fontWeight: 'bold',
     letterSpacing: 0.5,
   },
   textoOmitirAnimo: {
-    color: '#60A5A3',
+    color: '#666666',
     fontSize: 14,
-    fontWeight: '600',
+    textAlign: 'center',
   },
 });

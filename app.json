@@ -81,6 +81,16 @@
         {
           "motionPermission": "Maru necesita acceso al movimiento del dispositivo para detectar sacudidas de emergencia."
         }
+      ],
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Maru no utiliza tu ubicación en este dispositivo.",
+          "locationWhenInUsePermission": "Maru no utiliza tu ubicación en este dispositivo.",
+          "isIosBackgroundLocationEnabled": false,
+          "isAndroidBackgroundLocationEnabled": true,
+          "isAndroidForegroundServiceEnabled": true
+        }
       ]
     ],
     "experiments": {
