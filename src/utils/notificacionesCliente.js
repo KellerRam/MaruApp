@@ -5,7 +5,7 @@ import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 import { API_URL } from '../config/api';
 import { apiFetch as fetch } from '../config/apiFetch';
-import { conLimite, obtenerToken } from './session';
+import { alCerrarSesion, conLimite, obtenerToken } from './session';
 
 // Registro de notificaciones push para Android e iOS. Cada paso tiene tiempo límite o captura sus
 // errores: nunca bloquea el inicio de sesión ni deja la app esperando.
@@ -22,6 +22,12 @@ Notifications.setNotificationHandler({
   }),
 });
 
+// Evita el bucle de registros: getExpoPushTokenAsync dispara el listener de token en iOS, y el listener
+// volvía a registrar. Ahora solo se registra una vez a la vez y solo si el token cambió.
+let registroEnCurso = null;
+let ultimoTokenRegistrado = null;
+alCerrarSesion(() => { ultimoTokenRegistrado = null; });
+
 const registrarEnServidor = async (pushToken) => {
   const sesionActiva = await obtenerToken();
   if (!sesionActiva) return; // sin sesión no hay a quién asociar el dispositivo
@@ -36,8 +42,14 @@ const registrarEnServidor = async (pushToken) => {
 };
 
 // Canal (Android), permisos, token de Expo y registro en el servidor.
-export const registrarNotificacionesPush = async ({ solicitarPermiso = true } = {}) => {
-  if (Platform.OS === 'web') return null;
+export const registrarNotificacionesPush = (opciones = {}) => {
+  if (Platform.OS === 'web') return Promise.resolve(null);
+  if (registroEnCurso) return registroEnCurso;
+  registroEnCurso = ejecutarRegistro(opciones).finally(() => { registroEnCurso = null; });
+  return registroEnCurso;
+};
+
+const ejecutarRegistro = async ({ solicitarPermiso = true } = {}) => {
   try {
     if (!Device.isDevice) return null; // los simuladores no reciben push
 
@@ -68,7 +80,9 @@ export const registrarNotificacionesPush = async ({ solicitarPermiso = true } = 
       console.warn('No se obtuvo el token push (sin respuesta de Expo/APNs a tiempo).');
       return null;
     }
+    if (pushToken === ultimoTokenRegistrado) return pushToken;
     await registrarEnServidor(pushToken);
+    ultimoTokenRegistrado = pushToken;
     return pushToken;
   } catch (error) {
     console.warn('No se pudo registrar el token push:', error.message);
@@ -82,7 +96,10 @@ export const activarNotificacionesDeSesion = () => registrarNotificacionesPush({
 // Si el sistema rota el token push, se vuelve a registrar (solo con sesión activa).
 export const iniciarNotificaciones = () => {
   if (Platform.OS === 'web') return () => {};
-  const suscripcion = Notifications.addPushTokenListener(async () => {
+  const suscripcion = Notifications.addPushTokenListener(async (evento) => {
+    if (registroEnCurso) return;
+    const nuevo = evento?.data;
+    if (!nuevo || nuevo === ultimoTokenRegistrado) return;
     if (await obtenerToken()) registrarNotificacionesPush({ solicitarPermiso: false });
   });
   return () => suscripcion.remove();
